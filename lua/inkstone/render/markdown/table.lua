@@ -28,6 +28,7 @@ end
 
 ---@protected
 function Render:run()
+    local first_mark = #self.marks:get() + 1
     self:delimiter()
     local wrapped = {} ---@type table<integer, render.md.mark.Line[]>
     for i, row in ipairs(self.data.rows) do
@@ -45,6 +46,14 @@ function Render:run()
         if lines then
             self.marks:replace(self.config, row.node, lines)
         end
+    end
+    local marks, replaced = self.marks:get(), false
+    for i = first_mark, #marks do replaced = replaced or marks[i].replace ~= nil end
+    if replaced then
+        local range = { self.node.start_row, self.node.end_row - (self.node.end_col == 0 and 1 or 0) }
+        self.context.tables[#self.context.tables + 1] = range
+        -- Borders can live on adjacent blank rows, outside the table range.
+        for i = first_mark, #marks do marks[i].table_range = range end
     end
 end
 
@@ -78,7 +87,7 @@ function Render:delimiter()
     if self.data.layout.wrap and env.win.get(self.context.win, 'wrap') then
         local _, source = delim:line('first', 0)
         local width = str.width(source) + self:indent():size()
-        if width > env.win.width(self.context.win) then
+        if width > self.context:window_width() then
             local line = self:line()
             line:extend(self.data.prefixes[delim.start_row])
             line:text(delimiter, self.config.head)
@@ -147,7 +156,7 @@ function Render:row_fits(row)
     if env.win.get(self.context.win, 'wrap') then
         local _, source = row.node:line('first', 0)
         local width = str.width(source) + self:indent():size() + added
-        return width <= env.win.width(self.context.win)
+        return width <= self.context:window_width()
     end
     return true
 end

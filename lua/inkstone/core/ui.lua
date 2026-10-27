@@ -16,6 +16,7 @@ M.cache = {}
 
 ---called from state on setup
 function M.setup()
+    require('inkstone.lib.layout_cache').cache = {}
     require('inkstone.core.media').reset()
     local folds = require('inkstone.core.folds')
     for buf in pairs(folds.trees) do folds.clear(buf) end
@@ -135,8 +136,13 @@ function Updater:render()
                 return
             end
             local initial = self.decorator:initial()
-            self:clear()
-            self.decorator:set(extmarks)
+            -- A custom clear callback may depend on seeing an empty namespace.
+            if state.on.clear ~= require('inkstone.settings').on.default.clear then
+                self:clear()
+                self.decorator:set(extmarks)
+            else
+                self.decorator:replace(M.ns, extmarks)
+            end
             if initial then
                 compat.fix_lsp_window(self.buf, self.win, extmarks)
                 state.on.initial({ buf = self.buf, win = self.win })
@@ -176,12 +182,23 @@ end
 ---@private
 function Updater:display()
     local range = self:hidden()
+    self.editing = self:editing_table()
     self.decorator:display(M.ns, function(extmark)
         return self:hide(extmark, range)
     end)
     local context = Context.get(self.buf)
     require('inkstone.core.media').update(context, range)
     state.on.render({ buf = self.buf, win = self.win })
+end
+
+-- A wrapped table is one display layout. Restore its source as a unit so raw
+-- long URLs never mix with virtual rows and borders from the rendered layout.
+function Updater:editing_table()
+    local row = env.row.get(self.buf, self.win)
+    local context = Context.get(self.buf)
+    for _, range in ipairs(context.tables or {}) do
+        if row and row >= range[1] and row <= range[2] then return range end
+    end
 end
 
 ---@private
@@ -214,6 +231,13 @@ end
 ---@return boolean
 function Updater:hide(extmark, range)
     local mark = extmark:get()
+
+    local editing = self.editing
+    local owner = mark.table_range
+    if editing and (extmark:overlaps(editing)
+        or (owner and owner[1] == editing[1] and owner[2] == editing[2])) then
+        return true
+    end
 
     -- virtual row -> no editable screen cells -> must hide
     if mark.replace then

@@ -8,6 +8,7 @@ local log = require('inkstone.core.log')
 ---@field start_col integer
 ---@field opts render.md.mark.Opts
 ---@field replace? render.md.mark.Line[]
+---@field table_range? render.md.Range
 
 ---@alias render.md.mark.Conceal boolean|render.md.Element
 

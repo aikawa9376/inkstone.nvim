@@ -11,7 +11,7 @@ function M.wrap(rows, width, options)
         units = {}
     end
     for i, row in ipairs(rows) do
-        local next_units = Parser.units(row.line)
+        local next_units = row.units or Parser.units(row.line)
         local previous, first = units[#units], next_units[1]
         if previous and first and not (previous.width > 1 and first.width > 1) then
             units[#units + 1] = { text = ' ', width = 1, highlight = previous.highlight }

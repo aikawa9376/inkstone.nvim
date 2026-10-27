@@ -1,6 +1,5 @@
 local Base = require('inkstone.render.base')
 local colors = require('inkstone.core.colors')
-local env = require('inkstone.lib.env')
 local list = require('inkstone.lib.list')
 local str = require('inkstone.lib.str')
 
@@ -202,14 +201,14 @@ function Render:box(marker_width)
     else
         width = width + vim.fn.max(self.node:widths())
     end
-    local left = env.win.percent(self.context.win, self.data.left_pad, width)
-    local right = env.win.percent(self.context.win, self.data.right_pad, width)
+    local left = self.context:percent(self.data.left_pad, width)
+    local right = self.context:percent(self.data.right_pad, width)
     local body = math.max(left + width + right, self.data.min_width)
     ---@type render.md.heading.Box
     return {
         padding = left,
         body = body,
-        margin = env.win.percent(self.context.win, self.data.left_margin, body),
+        margin = self.context:percent(self.data.left_margin, body),
     }
 end
 

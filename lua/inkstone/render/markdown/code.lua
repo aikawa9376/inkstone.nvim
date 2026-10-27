@@ -66,7 +66,7 @@ function Render:offset(value, used)
     if value <= 0 then
         return 0
     end
-    local result = env.win.percent(self.context.win, value, used)
+    local result = self.context:percent(value, used)
     if self.node.text:find('\t') then
         -- round to the next multiple of tab
         local tab = env.buf.get(self.context.buf, 'tabstop')

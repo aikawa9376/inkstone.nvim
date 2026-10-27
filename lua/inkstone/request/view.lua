@@ -55,6 +55,37 @@ function View:overlaps(node)
     return false
 end
 
+---Visit direct children in the view without wrapping every off-screen row.
+---Children are ordered and non-overlapping, so seek by end row, then walk.
+function View:children(root, callback)
+    local seen = {}
+    for _, range in ipairs(self.ranges) do
+        local low, high = 0, root:child_count()
+        while low < high do
+            local middle = math.floor((low + high) / 2)
+            local _, _, finish = root:child(middle):range()
+            if finish < range[1] then low = middle + 1 else high = middle end
+        end
+        local node = root:child(low)
+        while node do
+            local first = node:range()
+            if first > range[2] then break end
+            local id = node:id()
+            if not seen[id] then seen[id] = true; callback(node) end
+            node = node:next_sibling()
+        end
+    end
+end
+
+-- Share native tree enumeration within one synchronous handler pass only.
+function View:each_tree(parser, callback)
+    if self.trees then
+        for _, entry in ipairs(self.trees) do callback(entry[1], entry[2]) end
+    else
+        parser:for_each_tree(callback)
+    end
+end
+
 ---@param parser vim.treesitter.LanguageTree
 ---@param callback fun()
 function View:parse(parser, callback)

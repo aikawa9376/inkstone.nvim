@@ -119,7 +119,7 @@ function Highlights:compute()
     if not parser then
         return
     end
-    parser:for_each_tree(function(tree, language_tree)
+    self.view:each_tree(parser, function(tree, language_tree)
         self:tree(language_tree:lang(), tree:root())
     end)
 end

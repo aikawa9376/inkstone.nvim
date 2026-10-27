@@ -1,5 +1,4 @@
 local Base = require('inkstone.render.base')
-local env = require('inkstone.lib.env')
 local display = require('inkstone.lib.display')
 local str = require('inkstone.lib.str')
 
@@ -44,8 +43,8 @@ end
 function Render:run()
     local widths = self.node:widths()
     local width = math.max(vim.fn.max(widths), self.config.min_width)
-    local margin = env.win.percent(self.context.win, self.data.margin, width)
-    local indent = env.win.percent(self.context.win, self.data.indent, width)
+    local margin = self.context:percent(self.data.margin, width)
+    local indent = self.context:percent(self.data.indent, width)
     if self:reflow(margin, indent) then return end
     self:padding(self.node.start_row, self.node.end_row - 1, margin)
     self:padding(self.node.start_row, self.node.start_row, indent)
@@ -63,9 +62,17 @@ function Render:reflow(margin, indent)
         if formula.start_row >= node.start_row and formula.start_row <= node.end_row then return false end
     end
     local prefix = self:indent():line(true):extend(display.prefix(self.context, self.marks:get(), node))
-    local available = env.win.width(self.context.win) - prefix:width() - margin - indent
+    local available = self.context:window_width() - prefix:width() - margin - indent
     if available < 2 then return false end
-    local rows, maximum = {}, 0
+    local cache = require('inkstone.lib.layout_cache')
+    local inputs = {}
+    local input = {
+        available, margin, indent, prefix:get(),
+        { self.config.japanese.enabled, self.config.japanese.budoux }, self.context.config.padding.highlight,
+        self.context.conceal.level, vim.bo[self.context.buf].tabstop,
+        vim.bo[self.context.buf].vartabstop, vim.o.ambiwidth, vim.o.display, inputs,
+    }
+    local bodies, bytes = {}, 0
     local source = vim.api.nvim_buf_get_lines(self.context.buf, node.start_row, node.end_row + 1, false)
     for i, text in ipairs(source) do
         local row = node.start_row + i - 1
@@ -78,21 +85,56 @@ function Render:reflow(margin, indent)
             local hard = raw:match('  $') ~= nil or raw:match('\\$') ~= nil
             if raw:match('\\$') then stop = stop - 1 end
             while stop > start and text:sub(stop, stop):match('%s') do stop = stop - 1 end
-            local line = display.line(self.context, {
+            local body = {
                 start_row = row, end_row = row, start_col = start, end_col = stop,
                 text = text:sub(start + 1, stop),
-            })
-            local _, minimum = require('inkstone.parser.table').measure(require('inkstone.parser.table').units(line))
-            if minimum > available then return false end
-            maximum = math.max(maximum, str.line_width(line))
-            rows[#rows + 1] = { line = line, hard = hard }
+            }
+            local highlights = self.context.highlights:line(row)
+            local inline = self.context.inline:get(body, true)
+            bodies[#bodies + 1] = { body = body, hard = hard }
+            -- Arrays keep the snapshot canonical: map iteration order is not a
+            -- stable cache key. Include custom handler highlights/insertions.
+            local groups, conceals, insertions = {}, {}, {}
+            for _, group in ipairs(highlights.groups) do
+                groups[#groups + 1] = { group[1], group[2], group.priority, group.highlight }
+            end
+            for _, conceal in ipairs(highlights.conceals) do
+                conceals[#conceals + 1] = { conceal[1], conceal[2], conceal.replacement, conceal.blocks }
+            end
+            for _, value in ipairs(inline) do insertions[#insertions + 1] = { value.col, value.line } end
+            inputs[#inputs + 1] = { row, start, stop, body.text, hard, groups, conceals, insertions }
+            bytes = bytes + #body.text * 64 + #highlights.groups * 128 + #highlights.conceals * 128
         end
     end
-    if #rows == 0 or (#rows == 1 and maximum <= available) then return false end
+    local key = 'paragraph:' .. node.start_row .. ':' .. node.start_col
+    -- Native encoding gives an immutable exact snapshot without recursively
+    -- copying/comparing thousands of highlight tables in Lua on every frame.
+    input = vim.mpack.encode(input)
+    local cached = cache.get(self.context.buf, key, input)
+    if cached ~= nil then
+        if cached == false then return false end
+        self.marks:replace(self.config, node, cached)
+        return true
+    end
+    local rows, maximum = {}, 0
+    local Parser = require('inkstone.parser.table')
+    for _, value in ipairs(bodies) do
+        local line = display.line(self.context, value.body)
+        local units = Parser.units(line)
+        local _, minimum = Parser.measure(units)
+        if minimum > available then return false end
+        maximum = math.max(maximum, str.line_width(line))
+        rows[#rows + 1] = { line = line, units = units, hard = value.hard }
+    end
+    if #rows == 0 or (#rows == 1 and maximum <= available) then
+        cache.put(self.context.buf, key, input, false, bytes)
+        return false
+    end
     local wrapped = require('inkstone.text.paragraph').wrap(rows, available, self.config.japanese)
     for i, line in ipairs(wrapped) do
         wrapped[i] = prefix:copy():pad(margin + (i == 1 and indent or 0)):extend(line):get()
     end
+    cache.put(self.context.buf, key, input, wrapped, bytes)
     self.marks:replace(self.config, node, wrapped)
     return true
 end

@@ -5,15 +5,16 @@ local function text(buf, node)
 end
 
 -- Return half-open source ranges, never treating fence contents as HTML.
-function M.blocks(buf, parser, config)
+function M.blocks(buf, parser, config, view)
     local roots, identities = {}, {}
-    parser:for_each_tree(function(tree, language)
+    local function collect(tree, language)
         if language:lang() == 'markdown' then
             local root = tree:root()
             roots[#roots + 1] = root
             identities[#identities + 1] = root:id()
         end
-    end)
+    end
+    if view then view:each_tree(parser, collect) else parser:for_each_tree(collect) end
     table.sort(identities)
     local tick = vim.api.nvim_buf_get_changedtick(buf)
     local signature = table.concat(identities, ':') .. tostring(config.code) .. tostring(config.callout) .. tostring(config.details)
@@ -98,7 +99,7 @@ end
 function M.apply(context, parser, marks)
     local config = context.config.folds
     if not config.enabled then return marks end
-    local blocks = M.blocks(context.buf, parser, config)
+    local blocks = M.blocks(context.buf, parser, config, context.view)
     local hidden, extra = {}, {}
     local function add(row, opts)
         extra[#extra + 1] = { conceal = true, modes = config.render_modes, start_row = row, start_col = 0, opts = opts }

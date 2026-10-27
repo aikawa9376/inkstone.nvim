@@ -1,5 +1,4 @@
 local Base = require('inkstone.render.base')
-local env = require('inkstone.lib.env')
 
 ---@class render.md.dash.Data
 ---@field width integer
@@ -33,9 +32,9 @@ end
 ---@return integer
 function Render:get_width(width, used)
     if type(width) == 'number' then
-        return env.win.percent(self.context.win, width, used)
+        return self.context:percent(width, used)
     elseif type(width) == 'function' then
-        return width({ width = env.win.width(self.context.win) })
+        return width({ width = self.context:window_width() })
     else
         return vim.o.columns
     end

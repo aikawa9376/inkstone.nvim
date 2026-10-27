@@ -78,10 +78,10 @@ class TerminalTests(unittest.TestCase):
                 self.screen.test_parse_written_data()
                 data = data[used:]
 
-    def render(self, lines, cell='trimmed', wrap=False, enabled=True, conceallevel=2):
+    def render(self, lines, cell='trimmed', wrap=False, enabled=True, conceallevel=2, anti_conceal=False):
         self.lines = lines
         body = 'vim.opt.rtp:prepend(' + json.dumps(str(ROOT)) + '); '
-        body += "require('inkstone').setup({anti_conceal={enabled=false}, display_compat={enabled="
+        body += "require('inkstone').setup({anti_conceal={enabled=" + str(anti_conceal).lower() + "}, display_compat={enabled="
         body += str(enabled).lower() + "}, pipe_table={cell='" + cell + "',wrap=" + str(wrap).lower()
         body += "}, code={sign=false}, win_options={conceallevel={default=0,rendered=" + str(conceallevel) + "}}}); "
         body += 'vim.api.nvim_buf_set_lines(0,0,-1,false,vim.json.decode('
@@ -185,6 +185,41 @@ class TerminalTests(unittest.TestCase):
         self.lua("vim.api.nvim_win_set_cursor(0,{1,0}); require('inkstone.api').render({buf=vim.api.nvim_get_current_buf()}); vim.wait(100); vim.cmd('redraw!')")
         self.pump()
         self.assertIn('日本語の段落を文節で折り返します。', self.visible_text())
+
+    def test_wrapped_table_cursor_edit_and_restore(self):
+        fcntl.ioctl(self.fd, termios.TIOCSWINSZ, struct.pack('HHHH', 24, 60, 0, 0))
+        self.screen.resize(24, 60)
+        os.kill(self.pid, signal.SIGWINCH)
+        self.pump()
+        for anti_conceal in (False, True):
+            with self.subTest(anti_conceal=anti_conceal):
+                self.render(['BEFORE', '', '| A | B |', '| - | - |',
+                             '| [label](https://example.org/' + 'long-path/' * 10 + ') | 日本語の説明を折り返して表示します。 |',
+                             '| short | cell |', '', 'AFTER'], wrap=True, conceallevel=3, anti_conceal=anti_conceal)
+                before = self.visible_text()
+                self.assertIn('│', before)
+                self.assertNotIn('https://example.org/', before)
+                for row, col in ((5, 0), (5, 80), (6, 0)):
+                    self.lua('vim.api.nvim_win_set_cursor(0,{' + str(row) + ',' + str(col) + '}); '
+                             "require('inkstone.api').render({buf=vim.api.nvim_get_current_buf()}); vim.wait(100); vim.cmd('redraw!')")
+                    self.pump()
+                    text = self.visible_text()
+                    self.assertIn('| A | B |', text)
+                    self.assertNotIn('│', text)
+                    self.assertNotIn('┌', text)
+                    self.assert_source()
+                self.lua("vim.api.nvim_win_set_cursor(0,{5,20}); vim.api.nvim_buf_set_text(0,4,20,4,20,{'changed-'}); "
+                         "require('inkstone.api').render({buf=vim.api.nvim_get_current_buf()}); vim.wait(100); vim.cmd('redraw!')")
+                self.lines[4] = self.lines[4][:20] + 'changed-' + self.lines[4][20:]
+                self.pump()
+                self.assertNotIn('│', self.visible_text())
+                self.assert_source()
+                self.lua("vim.api.nvim_win_set_cursor(0,{1,0}); require('inkstone.api').render({buf=vim.api.nvim_get_current_buf()}); "
+                         "vim.wait(100); vim.cmd('normal! ggzt'); vim.cmd('redraw!')")
+                self.pump()
+                self.assertIn('│', self.visible_text())
+                self.assertNotIn('long-path/', self.visible_text())
+                self.assert_source()
 
     def test_details_callout_and_code_folds(self):
         self.render(['BEFORE', '', '<details>', '<summary>Details title</summary>', '', 'Secret detail body', '', '</details>', '',

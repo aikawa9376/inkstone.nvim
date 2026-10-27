@@ -73,22 +73,18 @@ end
 ---@return render.md.table.Data?
 function Parser:parse(root, marks)
     -- ensure delimiter and rows exist
-    local delim = nil ---@type render.md.Node?
+    local delim = root:child('pipe_table_delimiter_row')
     local row_nodes = {} ---@type render.md.Node[]
     local types = {
-        delim = 'pipe_table_delimiter_row',
         row = { 'pipe_table_header', 'pipe_table_row' },
         skip = { 'block_continuation' },
     }
-    root:for_each_child(function(node)
-        if node.type == types.delim then
-            delim = node
-        elseif self.context.view:overlaps(node:get()) then
-            if vim.tbl_contains(types.row, node.type) then
-                row_nodes[#row_nodes + 1] = node
-            elseif not vim.tbl_contains(types.skip, node.type) then
-                log.unhandled(self.context.buf, 'markdown', 'row', node.type)
-            end
+    self.context.view:children(root:get(), function(ts_node)
+        local kind = ts_node:type()
+        if vim.tbl_contains(types.row, kind) then
+            row_nodes[#row_nodes + 1] = require('inkstone.lib.node').new(self.context.buf, ts_node)
+        elseif kind ~= 'pipe_table_delimiter_row' and not vim.tbl_contains(types.skip, kind) then
+            log.unhandled(self.context.buf, 'markdown', 'row', kind)
         end
     end)
     if not delim or #row_nodes == 0 then
@@ -188,7 +184,7 @@ function Parser:parse(root, marks)
             end
         end
 
-        local budget = env.win.width(self.context.win)
+        local budget = self.context:window_width()
         budget = budget - (prefix_width + #cols + 1)
 
         local widths = Parser.allocate(desired, minimum, budget)

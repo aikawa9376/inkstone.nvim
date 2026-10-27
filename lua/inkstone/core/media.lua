@@ -48,8 +48,9 @@ function M.collect(context, parser, marks)
         item.key = key .. ':' .. vim.fn.sha256(item.source)
         context.media[#context.media + 1] = item
     end
-    parser:for_each_tree(function(tree, language)
+    context.view:each_tree(parser, function(tree, language)
         local lang = language:lang()
+        if not context.view:overlaps(tree:root()) then return end
         if lang == 'markdown_inline' and config.images then
             local query = require('inkstone.core.ts').parse(lang, '(image) @image')
             context.view:nodes(tree:root(), query, function(_, node)

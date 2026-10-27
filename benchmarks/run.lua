@@ -4,7 +4,7 @@ local root = vim.fs.dirname(vim.fs.dirname(vim.fn.fnamemodify(source, ':p')))
 local baseline = vim.env.INKSTONE_BASELINE == '1'
 local name = baseline and 'render-markdown' or 'inkstone'
 local dependency = vim.env.INKSTONE_UPSTREAM_RTP or (vim.fn.stdpath('data') .. '/lazy/render-markdown.nvim')
-vim.opt.rtp:prepend(baseline and dependency or root)
+vim.opt.rtp:prepend(baseline and dependency or (vim.env.INKSTONE_BENCH_RTP or root))
 vim.opt.rtp:append(vim.env.INKSTONE_PARSER_RTP or (vim.fn.stdpath('data') .. '/site'))
 vim.o.columns, vim.o.lines = 140, 45
 vim.o.redrawtime = 5000
@@ -42,7 +42,7 @@ for _, scenario in ipairs({ 'code', 'inline', 'table' }) do
         context.view.ranges = { { first, first + 40 } }
         return require(name .. '.core.handlers').run(context, parser)
     end
-    render()
+    started = clock(); render(); local cold_render_ms = clock() - started
     for sample = 1, 5 do
         collectgarbage('collect'); started = clock(); marks = render(); times[sample] = clock() - started
     end
@@ -56,8 +56,28 @@ for _, scenario in ipairs({ 'code', 'inline', 'table' }) do
         decorator:set(extmarks)
         started = clock(); decorator:display(ns, function() return false end); applied[sample] = clock() - started
     end
+    local previous = {}
+    for _, mark in ipairs(vim.api.nvim_buf_get_extmarks(buf, ns, 0, -1, {})) do previous[mark[1]] = true end
+    local refreshed = {}
+    for sample = 1, 3 do
+        started = clock()
+        local extmarks = {}
+        for _, mark in ipairs(marks) do extmarks[#extmarks + 1] = require(name .. '.lib.extmark').new(mark) end
+        if decorator.replace then decorator:replace(ns, extmarks)
+        else decorator:clear(ns); decorator:set(extmarks) end
+        decorator:display(ns, function() return false end)
+        refreshed[sample] = clock() - started
+    end
+    local retained = 0
+    for _, mark in ipairs(vim.api.nvim_buf_get_extmarks(buf, ns, 0, -1, {})) do
+        if previous[mark[1]] then retained = retained + 1 end
+    end
+    if vim.env.INKSTONE_BENCH_MARKS then
+        vim.fn.writefile({ vim.json.encode(marks) }, vim.env.INKSTONE_BENCH_MARKS .. '-' .. scenario .. '.json')
+    end
     result.scenarios[#result.scenarios + 1] = { name = scenario, rows = #lines, marks = #marks,
-        full_parse_ms = parse_ms, render_ms = median(times), apply_ms = median(applied), samples_ms = times }
+        full_parse_ms = parse_ms, cold_render_ms = cold_render_ms, render_ms = median(times),
+        apply_ms = median(applied), refresh_ms = median(refreshed), retained_marks = retained, samples_ms = times }
     if decorator.dispose then decorator:dispose() else decorator.timer:stop(); decorator.timer:close() end
     vim.api.nvim_buf_delete(buf, { force = true })
 end

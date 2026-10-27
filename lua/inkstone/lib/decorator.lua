@@ -52,28 +52,87 @@ function Decorator:set(marks)
     self.n = self.n + 1
 end
 
+---Keep equal decorations across viewport refreshes and partial edits.
+function Decorator:replace(ns, marks)
+    local buckets, retained = {}, {}
+    local changed = self:changed()
+    local same = #marks == #self.marks
+    if same then
+        for i, extmark in ipairs(self.marks) do
+            if not vim.deep_equal(extmark:get(), marks[i]:get())
+                or (changed and not extmark:valid(ns, self.buf)) then same = false; break end
+        end
+    end
+    if same and not changed then
+        self:set(self.marks)
+        return
+    end
+    local function key(mark) return mark.start_row .. ':' .. mark.start_col end
+    for _, extmark in ipairs(self.marks) do
+        local k = key(extmark:get())
+        buckets[k] = buckets[k] or {}
+        buckets[k][#buckets[k] + 1] = extmark
+    end
+    for i, next_mark in ipairs(marks) do
+        local bucket = buckets[key(next_mark:get())] or {}
+        for index, old in ipairs(bucket) do
+            if vim.deep_equal(old:get(), next_mark:get())
+                and (not changed or old:valid(ns, self.buf)) then
+                retained[old], marks[i] = true, old
+                bucket[index] = bucket[#bucket]
+                bucket[#bucket] = nil
+                break
+            end
+        end
+    end
+    for _, extmark in ipairs(self.marks) do
+        if not retained[extmark] then extmark:hide(ns, self.buf) end
+    end
+    if changed then
+        for _, extmark in ipairs(self.generated) do extmark:hide(ns, self.buf) end
+        self.generated = {}
+        self.layout = nil
+    end
+    self:set(marks)
+end
+
 ---@param ns integer
 function Decorator:clear(ns)
     for _, extmark in ipairs(self:get()) do
         extmark:hide(ns, self.buf)
     end
     self.generated = {}
+    self.layout = nil
 end
 
 ---@param ns integer
 ---@param hide fun(extmark: render.md.Extmark): boolean
 function Decorator:display(ns, hide)
     local visible = {} ---@type render.md.Mark[]
+    local layout = {}
     for _, extmark in ipairs(self.marks) do
         if hide(extmark) then
             extmark:hide(ns, self.buf)
         else
             extmark:show(ns, self.buf)
             visible[#visible + 1] = extmark:get()
+            if extmark:get().replace or extmark:get().opts.conceal_lines then layout[#layout + 1] = extmark end
         end
     end
 
     local line_count = vim.api.nvim_buf_line_count(self.buf)
+    local tick = self:get_tick()
+    local previous = self.layout
+    local same = previous and previous.tick == tick and previous.lines == line_count and #previous.marks == #layout
+    if same then
+        for i, extmark in ipairs(layout) do
+            if previous.marks[i] ~= extmark then same = false; break end
+        end
+    end
+    -- Descriptions are immutable after construction. Reconciliation retains
+    -- the same objects only after comparing the entire regenerated mark.
+    if same then return end
+    self.layout = { tick = tick, lines = line_count, marks = layout }
     local generated = replacements.resolve(visible, line_count)
     local current = {} ---@type render.md.Mark[]
     for _, extmark in ipairs(self.generated) do

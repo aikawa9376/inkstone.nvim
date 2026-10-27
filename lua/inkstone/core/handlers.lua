@@ -19,8 +19,13 @@ M.builtin = {
 ---@param parser vim.treesitter.LanguageTree
 ---@return render.md.Mark[]
 function M.run(context, parser)
+    context._width = nil
     local language_roots = {} ---@type table<string, TSNode[]>
+    context.view.trees = {}
     parser:for_each_tree(function(tree, language_tree)
+        context.view.trees[#context.view.trees + 1] = { tree, language_tree }
+    end)
+    context.view:each_tree(parser, function(tree, language_tree)
         local root = tree:root()
         local language = language_tree:lang()
         if
@@ -57,7 +62,9 @@ function M.run(context, parser)
     end
     marks = require('inkstone.core.folds').apply(context, parser, marks)
     require('inkstone.core.media').collect(context, parser, marks)
-    return require('inkstone.render.compat').apply(context, marks)
+    marks = require('inkstone.render.compat').apply(context, marks)
+    context.view.trees = nil
+    return marks
 end
 
 ---@private

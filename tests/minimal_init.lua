@@ -1,6 +1,7 @@
 -- Offline upstream-compatibility suite; install parsers and test deps explicitly.
 vim.o.columns, vim.o.lines = 80, 40
 vim.o.laststatus, vim.o.ruler, vim.o.tabstop, vim.o.wrap = 0, false, 4, false
+vim.o.swapfile = false
 local data = vim.fn.stdpath('data')
 vim.opt.rtp:prepend('.')
 if vim.env.INKSTONE_EXTRA_PARSER_RTP then vim.opt.rtp:prepend(vim.env.INKSTONE_EXTRA_PARSER_RTP) end

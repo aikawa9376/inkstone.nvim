@@ -39,6 +39,10 @@ describe('table wrapping', function()
         '',
         'AFTER',
     }
+    local mixed_source = {
+        'BEFORE', '', '| A | B | C |', '| :- | :-: | -: |', '| x | y | short |',
+        '| z | w | one two three four five six se', 'ven eight nine ten |', '| a | b | end |', '', 'AFTER',
+    }
     local mixed_rendered = {
         'BEFORE',
         '┌───┬───┬──────────────────────────────┐',
@@ -145,7 +149,7 @@ describe('table wrapping', function()
     it('cursor on a fitting row', function()
         util.setup.text(mixed, { pipe_table = { cell = 'trimmed' } })
         util.set_row(5)
-        util.assert_screen(mixed_rendered)
+        util.assert_screen(mixed_source)
     end)
 
     it('source padding with nowrap', function()
@@ -162,15 +166,8 @@ describe('table wrapping', function()
         }, { pipe_table = { cell = 'padded' } })
         util.set_row(5)
         util.assert_screen({
-            'BEFORE',
-            '┌───┬──────────────────────────────────┐',
-            '│ A │ B                                │',
-            '├───┼──────────────────────────────────┤',
-            '│ x │ padded                           │',
-            '│ y │ one two three four five six      │',
-            '│   │ seven eight nine ten             │',
-            '└───┴──────────────────────────────────┘',
-            'AFTER',
+            'BEFORE', '', '| A | B |', '| - | - |', '| x | padded',
+            '| y | one two three four five six seven', '', 'AFTER',
         })
     end)
 
@@ -288,19 +285,15 @@ describe('table wrapping', function()
 
         util.set_row(100, true)
         util.assert_screen({
-            '│ x │ y                                │',
-            '│ x │ y                                │',
-            '│ x │ y                                │',
-            '│ x │ y                                │',
-            '│ x │ long long long long long long    │',
-            '│   │ long long long long long long    │',
-            '│   │ long long long long long long    │',
-            '│   │ long long long long long long    │',
-            '│   │ long long long long long long    │',
-            '│   │ long long long long long long    │',
-            '│   │ long long long long              │',
-            '└───┴──────────────────────────────────┘',
+            '| x | y |', '| x | y |', '| x | y |', '| x | y |',
+            '| x | long long long long long long long',
+            ' long long long long long long long long',
+            ' long long long long long long long long',
+            ' long long long long long long long long',
+            ' long long long long long long long long', ' long |',
         })
+        util.set_row(1, true)
+        util.assert_screen(expected)
     end)
 
     it('EOF', function()
@@ -333,16 +326,9 @@ describe('table wrapping', function()
             pipe_table = { cell = 'trimmed' },
         })
         util.assert_screen({
-            '| Name | Description |',
-            '├───────┼──────────────────────────────┤',
-            '│ bold  │ Here is a long description   │',
-            '│       │ with 󰖟 a link and some code  │',
-            '│       │ and 行行行.                  │',
-            '│ short │ Another very long            │',
-            '│       │ description which should     │',
-            '│       │ wrap into several lines      │',
-            '│       │ neatly.                      │',
-            '└───────┴──────────────────────────────┘',
+            '| Name | Description |', '| --- | --- |',
+            '| bold | Here is a long description', 'with a link and', 'some code and 行行行. |',
+            '| short | Another very long description', 'which should wrap into several lines nea', 'tly. |',
         })
     end)
 
@@ -351,18 +337,7 @@ describe('table wrapping', function()
         util.assert_screen(mixed_rendered)
 
         util.set_row(6)
-        util.assert_screen({
-            'BEFORE',
-            '┌───┬───┬──────────────────────────────┐',
-            '│ A │ B │                            C │',
-            '├━──┼━─━┼─────────────────────────────━┤',
-            '│ x │ y │                        short │',
-            '| z | w | one two three four five six se',
-            'ven eight nine ten |',
-            '│ a │ b │                          end │',
-            '└───┴───┴──────────────────────────────┘',
-            'AFTER',
-        })
+        util.assert_screen(mixed_source)
 
         util.set_row(1)
         util.assert_screen(mixed_rendered)
@@ -373,15 +348,8 @@ describe('table wrapping', function()
         util.setup.text(mixed, { pipe_table = { cell = 'trimmed' } })
         util.set_row(6)
         util.assert_screen({
-            'BEFORE',
-            '┌───┬───┬──────────────────────────────┐',
-            '│ A │ B │                            C │',
-            '├━──┼━─━┼─────────────────────────────━┤',
-            '│ x │ y │                        short │',
-            '| z | w | one two three four five six se',
-            '│ a │ b │                          end │',
-            '└───┴───┴──────────────────────────────┘',
-            'AFTER',
+            'BEFORE', '', '| A | B | C |', '| :- | :-: | -: |', '| x | y | short |',
+            '| z | w | one two three four five six se', '| a | b | end |', '', 'AFTER',
         })
     end)
 

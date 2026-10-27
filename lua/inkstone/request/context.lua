@@ -35,6 +35,7 @@ function Context.new(buf, win, config, view)
     self.inline = require('inkstone.request.inline').new()
     self.latex = require('inkstone.request.latex').new()
     self.used = require('inkstone.request.used').new()
+    self.tables = {}
     return self
 end
 
@@ -47,6 +48,19 @@ function Context:width(body)
     return str.width(body.text)
         + self.inline:width(body)
         - self.conceal:get(body)
+end
+
+-- getwininfo() may prepare native highlighters; take one width snapshot per
+-- handler pass instead of repeating that work for each table row/paragraph.
+function Context:window_width()
+    if not self._width then self._width = require('inkstone.lib.env').win.width(self.win) end
+    return self._width
+end
+
+function Context:percent(value, used)
+    if value <= 0 then return 0 end
+    if value >= 1 then return value end
+    return math.floor(((self:window_width() - used) * value) + 0.5)
 end
 
 ---@class render.md.request.context.Manager
