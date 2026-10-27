@@ -11,11 +11,12 @@ local str = require('inkstone.lib.str')
 ---@field private context render.md.request.Context
 ---@field private marks render.md.Marks
 ---@field private config render.md.latex.Config
+---@field private cache table<string, string|false>
 local Handler = {}
 Handler.__index = Handler
 
 ---@private
----@type table<string, string>
+---@type table<string, table<string, string|false>>
 Handler.cache = {}
 
 ---@param buf integer
@@ -41,6 +42,11 @@ function Handler:run(root, last)
         log.add('debug', 'ConverterNotFound', self.config.converter)
         return {}
     end
+    -- A newly installed/preferred converter must not reuse the previous
+    -- converter's flat output for the same formula.
+    local key = table.concat(cmds, '\0')
+    Handler.cache[key] = Handler.cache[key] or {}
+    self.cache = Handler.cache[key]
 
     local node = Node.new(self.context.buf, root)
     local count = str.char_count(node.text, '$')
@@ -53,15 +59,19 @@ function Handler:run(root, last)
 
     if last then
         local nodes = self.context.latex:get()
-        local inputs = Handler.inputs(nodes)
+        local inputs = Handler.inputs(nodes, self.cache)
         for _, cmd in ipairs(cmds) do
-            inputs = Handler.convert(cmd, inputs)
+            inputs = Handler.convert(cmd, inputs, self.cache)
         end
         for _, input in ipairs(inputs) do
             log.add('error', 'ConvertersFailed', input)
-            Handler.cache[input] = 'error'
+            self.cache[input] = false
         end
-        local rows = self:rows(nodes)
+        local remaining = {}
+        for _, formula in ipairs(nodes) do
+            if not self:replace_block(formula) then remaining[#remaining + 1] = formula end
+        end
+        local rows = self:rows(remaining)
         for row, row_nodes in pairs(rows) do
             self:render(row, row_nodes)
         end
@@ -73,11 +83,11 @@ end
 ---@private
 ---@param nodes render.md.Node[]
 ---@return string[]
-function Handler.inputs(nodes)
+function Handler.inputs(nodes, cache)
     local inputs = {} ---@type string[]
     for _, node in ipairs(nodes) do
         local input = Handler.input(node)
-        if not Handler.cache[input] and not vim.tbl_contains(inputs, input) then
+        if cache[input] == nil and not vim.tbl_contains(inputs, input) then
             inputs[#inputs + 1] = input
         end
     end
@@ -96,7 +106,7 @@ end
 ---@param cmd string
 ---@param inputs string[]
 ---@return string[]
-function Handler.convert(cmd, inputs)
+function Handler.convert(cmd, inputs, cache)
     local failed = {} ---@type string[]
     if vim.system then
         local tasks = {} ---@type table<string, vim.SystemObj>
@@ -107,7 +117,7 @@ function Handler.convert(cmd, inputs)
             local output = task:wait()
             local result = output.stdout
             if output.code == 0 and result then
-                Handler.cache[input] = result
+                cache[input] = result
             else
                 failed[#failed + 1] = input
             end
@@ -116,13 +126,35 @@ function Handler.convert(cmd, inputs)
         for _, input in ipairs(inputs) do
             local result = vim.fn.system(cmd, input)
             if vim.v.shell_error == 0 and result then
-                Handler.cache[input] = result
+                cache[input] = result
             else
                 failed[#failed + 1] = input
             end
         end
     end
     return failed
+end
+
+-- The default centered view replaces a standalone multiline block as a unit.
+-- Above/below remain explicit source-plus-preview layouts. Keep mixed prose
+-- intact when a formula shares its first or last line with other content.
+function Handler:replace_block(node)
+    if self.config.position ~= 'center' or node:height() <= 1 or not require('inkstone.lib.compat').has_11 then return false end
+    local output = self.cache[Handler.input(node)]
+    if not output or output == '' then return false end
+    local first = vim.api.nvim_buf_get_lines(self.context.buf, node.start_row, node.start_row + 1, false)[1] or ''
+    local last = vim.api.nvim_buf_get_lines(self.context.buf, node.end_row, node.end_row + 1, false)[1] or ''
+    if not first:sub(1, node.start_col):match('^%s*$') or not last:sub(node.end_col + 1):match('^%s*$') then
+        return false
+    end
+    local indent, lines = self:indent(node), {}
+    for _ = 1, self.config.top_pad do lines[#lines + 1] = {} end
+    for _, line in ipairs(str.split(output, '\n', true)) do
+        lines[#lines + 1] = indent:copy():text(line, self.config.highlight):get()
+    end
+    for _ = 1, self.config.bottom_pad do lines[#lines + 1] = {} end
+    self.marks:replace(self.config, node, lines)
+    return true
 end
 
 ---@private
@@ -175,7 +207,7 @@ function Handler:render(row, nodes)
     local current = 0
 
     for _, node in ipairs(nodes) do
-        local output = str.split(Handler.cache[Handler.input(node)], '\n', true)
+        local output = str.split(self.cache[Handler.input(node)] or '', '\n', true)
         if #output > 0 then
             -- add top and bottom padding around output
             for _ = 1, self.config.top_pad do

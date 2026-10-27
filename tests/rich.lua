@@ -135,12 +135,51 @@ return function(test, equal, buffer)
             for _, line in ipairs(mark.opts.virt_lines or {}) do
                 for _, chunk in ipairs(line) do text[#text + 1] = chunk[1] end
             end
+            for _, line in ipairs(mark.replace or {}) do
+                for _, chunk in ipairs(line) do text[#text + 1] = chunk[1] end
+            end
         end
         local output = table.concat(text, '\n')
         assert(output:find('√(3x-1)+(1+x)^2', 1, true), output)
         assert(output:find('lim_n→∞ (1 + 1/n)^n', 1, true), output)
         equal(vim.api.nvim_buf_get_lines(buf, 0, -1, false), original)
         parser.for_each_tree = each_tree
+        vim.api.nvim_buf_delete(buf, { force = true })
+    end)
+
+    external_test('rich math replaces block source and refreshes when converters change', { 'latex2text', 'utftex' }, function()
+        local original = { 'BEFORE', '', '$$', '\\lim_{n\\to\\infty} \\left(1 + \\frac{1}{n}\\right)^n', '$$', '', 'AFTER' }
+        local buf, render = setup(original, { latex = { converter = 'latex2text' } })
+        local function replacement(marks)
+            for _, mark in ipairs(marks) do if mark.replace then return mark end end
+        end
+        equal(#assert(replacement(render())).replace, 1)
+        local config = state.get(buf)
+        config.latex.converter = 'utftex'
+        local mark = assert(replacement(render()))
+        assert(#mark.replace >= 3)
+        local text = {}; for _, line in ipairs(mark.replace) do
+            for _, chunk in ipairs(line) do text[#text + 1] = chunk[1] end
+        end
+        assert(table.concat(text):find('─', 1, true))
+        equal({ mark.start_row, mark.opts.end_row }, { 2, 4 })
+        vim.api.nvim_win_set_cursor(0, { 4, 0 })
+        local updater = require('inkstone.core.ui').updater.new(buf, vim.api.nvim_get_current_win(), true)
+        updater.mode = 'n'
+        local extmark = require('inkstone.lib.extmark').new(mark)
+        assert(not updater:hide(extmark, updater:hidden()))
+        config.anti_conceal = { enabled = true, above = 0, below = 0, disabled_modes = {} }
+        assert(updater:hide(extmark, updater:hidden()))
+        config.latex.converter = 'false'
+        local log_level = state.log_level
+        state.log_level = 'off'
+        local failed = render()
+        state.log_level = log_level
+        for _, item in ipairs(failed) do
+            assert(not item.replace)
+            for _, chunk in ipairs(item.opts.virt_text or {}) do assert(chunk[1] ~= 'error') end
+        end
+        equal(vim.api.nvim_buf_get_lines(buf, 0, -1, false), original)
         vim.api.nvim_buf_delete(buf, { force = true })
     end)
 

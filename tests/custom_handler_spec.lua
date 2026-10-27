@@ -38,7 +38,7 @@ describe('custom handler', function()
     end
 
     it('default', function()
-        util.setup.text(lines)
+        util.setup.text(lines, { paragraph = { wrap = false } })
         -- inline code + no custom handler
         local marks = util.marks()
         marks:add({ 0, 0 }, { 0, 8 }, util.highlight('code'))
@@ -50,6 +50,7 @@ describe('custom handler', function()
 
     it('custom conceal override', function()
         util.setup.text(lines, {
+            paragraph = { wrap = false },
             custom_handlers = {
                 markdown_inline = { parse = handler },
             },
@@ -66,6 +67,7 @@ describe('custom handler', function()
 
     it('custom conceal extend', function()
         util.setup.text(lines, {
+            paragraph = { wrap = false },
             custom_handlers = {
                 markdown_inline = { extends = true, parse = handler },
             },

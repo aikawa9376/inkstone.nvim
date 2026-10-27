@@ -186,7 +186,7 @@ end
 ---@private
 function Updater:display()
     local range = self:hidden()
-    self.editing = self:editing_table()
+    self.editing = range and self:editing_table(range) or nil
     self.decorator:display(M.ns, function(extmark)
         return self:hide(extmark, range)
     end)
@@ -198,14 +198,12 @@ end
 
 -- A wrapped table is one display layout. Restore its source as a unit so raw
 -- long URLs never mix with virtual rows and borders from the rendered layout.
-function Updater:editing_table()
-    local row = env.row.get(self.buf, self.win)
+function Updater:editing_table(range)
     local context = Context.get(self.buf)
-    for _, range in ipairs(context.tables or {}) do
-        if row and row >= range[1] and row <= range[2] then return range end
-    end
-    for _, range in ipairs(context.table_views or {}) do
-        if row and row > range[1] and row <= range[2] then return range end
+    for _, ranges in ipairs({ context.tables or {}, context.table_views or {} }) do
+        for _, owner in ipairs(ranges) do
+            if range[1] <= owner[2] and range[2] >= owner[1] then return owner end
+        end
     end
 end
 
@@ -241,8 +239,6 @@ function Updater:hide(extmark, range)
     local mark = extmark:get()
 
     if mark.typography then
-        local row = env.row.get(self.buf, self.win)
-        if row and row >= mark.typography[1] and row <= mark.typography[2] then return true end
         if range and range[1] <= mark.typography[2] and range[2] >= mark.typography[1] then return true end
     end
 
@@ -251,15 +247,6 @@ function Updater:hide(extmark, range)
     if editing and (extmark:overlaps(editing)
         or (owner and owner[1] == editing[1] and owner[2] == editing[2])) then
         return true
-    end
-
-    -- virtual row -> no editable screen cells -> must hide
-    if mark.replace then
-        local row = env.row.get(self.buf, self.win)
-        local bottom = mark.opts.end_row or mark.start_row
-        if row and row >= mark.start_row and row <= bottom then
-            return true
-        end
     end
 
     -- not in top level or mark level modes -> hide

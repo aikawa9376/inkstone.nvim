@@ -147,7 +147,8 @@ describe('table wrapping', function()
     end)
 
     it('cursor on a fitting row', function()
-        util.setup.text(mixed, { pipe_table = { cell = 'trimmed' } })
+        util.setup.text(mixed, { pipe_table = { cell = 'trimmed' },
+            anti_conceal = { enabled = true, above = 0, below = 0 } })
         util.set_row(5)
         util.assert_screen(mixed_source)
     end)
@@ -163,7 +164,7 @@ describe('table wrapping', function()
             '| y | one two three four five six seven eight nine ten |',
             '',
             'AFTER',
-        }, { pipe_table = { cell = 'padded' } })
+        }, { pipe_table = { cell = 'padded' }, anti_conceal = { enabled = true, above = 0, below = 0 } })
         util.set_row(5)
         util.assert_screen({
             'BEFORE', '', '| A | B |', '| - | - |', '| x | padded',
@@ -283,6 +284,7 @@ describe('table wrapping', function()
         expected[#expected + 1] = ''
         util.assert_screen(expected)
 
+        require('inkstone.state').get(vim.api.nvim_get_current_buf()).anti_conceal = { enabled = true, above = 0, below = 0, disabled_modes = {} }
         util.set_row(100, true)
         util.assert_screen({
             '| x | y |', '| x | y |', '| x | y |', '| x | y |',
@@ -292,6 +294,7 @@ describe('table wrapping', function()
             ' long long long long long long long long',
             ' long long long long long long long long', ' long |',
         })
+        require('inkstone.state').get(vim.api.nvim_get_current_buf()).anti_conceal.enabled = false
         util.set_row(1, true)
         util.assert_screen(expected)
     end)
@@ -333,7 +336,8 @@ describe('table wrapping', function()
     end)
 
     it('cursor on wrapped row', function()
-        util.setup.text(mixed, { pipe_table = { cell = 'trimmed' } })
+        util.setup.text(mixed, { pipe_table = { cell = 'trimmed' },
+            anti_conceal = { enabled = true, above = 0, below = 0 } })
         util.assert_screen(mixed_rendered)
 
         util.set_row(6)
@@ -345,7 +349,8 @@ describe('table wrapping', function()
 
     it('cursor on wrapped row with nowrap', function()
         vim.o.wrap = false
-        util.setup.text(mixed, { pipe_table = { cell = 'trimmed' } })
+        util.setup.text(mixed, { pipe_table = { cell = 'trimmed' },
+            anti_conceal = { enabled = true, above = 0, below = 0 } })
         util.set_row(6)
         util.assert_screen({
             'BEFORE', '', '| A | B | C |', '| :- | :-: | -: |', '| x | y | short |',

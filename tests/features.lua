@@ -61,11 +61,14 @@ return function(test, equal, buffer)
         end
         equal(rows, { ' 日本語の段落を文節で折り返します。', ' English words follow.' })
         equal(vim.api.nvim_buf_get_lines(buf, 0, -1, false), original)
-        -- Cursor on any source row restores the complete paragraph.
+        -- Cursor restoration follows anti_conceal, including wrapped layouts.
         vim.api.nvim_win_set_cursor(0, { 4, 0 })
         local updater = require('inkstone.core.ui').updater.new(buf, vim.api.nvim_get_current_win(), true)
         updater.mode = 'n'
-        assert(updater:hide(require('inkstone.lib.extmark').new(replacement), nil))
+        local extmark = require('inkstone.lib.extmark').new(replacement)
+        assert(not updater:hide(extmark, updater:hidden()))
+        require('inkstone.state').get(buf).anti_conceal = { enabled = true, above = 0, below = 0, disabled_modes = {} }
+        assert(updater:hide(extmark, updater:hidden()))
         vim.api.nvim_buf_delete(buf, { force = true })
     end)
 

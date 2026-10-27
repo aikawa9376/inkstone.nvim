@@ -51,7 +51,7 @@ function Render:run()
 end
 
 -- Source rows remain searchable/yankable. The UI restores the entire paragraph
--- when its source contains the cursor, including with anti_conceal disabled.
+-- when anti_conceal includes its source; disabled anti_conceal keeps the layout.
 function Render:reflow(margin, indent)
     if not self.config.wrap or self.context.conceal.level < 2
         or not require('inkstone.lib.compat').has_11 then return false end

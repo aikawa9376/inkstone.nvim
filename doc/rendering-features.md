@@ -3,6 +3,12 @@
 These features render without changing source bytes. Search, yank and save keep
 the original Markdown. `:Inkstone disable` restores source rendering.
 
+Cursor restoration follows `anti_conceal` consistently for typography,
+paragraphs, table/list/chart views and replaced formula blocks. With
+`anti_conceal.enabled = false`, moving onto their source rows keeps the rendered
+view. When enabled, the configured `above`/`below` range restores source as a
+whole layout. `disabled_modes` and normal `render_modes` still apply.
+
 ## Japanese paragraph layout
 
 ```lua
@@ -19,9 +25,10 @@ boundaries and basic kinsoku rules. Soft source newlines join with a space for
 English; adjacent CJK text joins without adding a space. Two trailing spaces or
 a trailing backslash preserve an explicit line break. Inline highlights, links
 and inline code keep their rendered decorations. Width and layout are rebuilt
-on resize. The original paragraph returns when the cursor enters any of its
-source rows, even with `anti_conceal.enabled = false`; leaving it restores the
-layout. The side preview can show the rendered paragraph while the source is
+on resize. With anti-conceal enabled, the original paragraph returns when its
+source overlaps the configured cursor range; leaving it restores the layout.
+With anti-conceal disabled the layout stays visible under the cursor.
+The side preview can show the rendered paragraph while the source is
 being edited.
 
 `paragraph.wrap = false` restores the previous Neovim wrapping behavior.
@@ -44,10 +51,21 @@ Unicode text such as `√(3x-1)+(1+x)^2` and `lim_n→∞ (1 + 1/n)^n`; it does 
 typeset stacked fractions like a TeX image. `utftex` supports multiline Unicode
 math layouts. The current math path displays converter text, not Kitty images.
 At the default `latex.position = 'center'`, inline formulas replace their source
-while multiline formulas appear above their original block.
+and standalone multiline blocks replace all source rows with the converted
+layout. Moving onto them follows `anti_conceal`; disabling it keeps the rich
+view visible. Explicit `above`/`below` positions, and multiline formulas sharing
+their boundary lines with other prose, retain source plus preview. Converter
+results are cached per available converter list, so switching from latex2text
+to utftex rebuilds the layout. Failed conversion keeps readable source.
 
 Try `nvim --clean -u demo/rich_init.lua demo/latex.md` without downloading demo
 dependencies. `:checkhealth inkstone` reports available converters.
+For multiline Unicode math, install
+[utftex](https://github.com/bartp5/libtexprintf) separately; it is not in Arch's
+official repositories. A source build uses `./autogen.sh`,
+`./configure --prefix="$HOME/.local" --disable-shared`, `make`, `make check`
+and `make install`; ensure the chosen prefix's `bin` is on Neovim's PATH.
+Inkstone detects available converters and does not install them automatically.
 
 ## Images and diagrams
 
@@ -140,9 +158,10 @@ never executed as code.
 
 Charts are generated as SVG, rasterized by `media.chart_command = { 'rsvg-convert' }`
 and displayed through Snacks. Without that backend/converter they use text bars.
-The alternate view's header remains a visible interaction anchor. Entering a
-body source row restores the whole source table for editing and hides its chart;
-returning to the header or leaving restores the chosen view. Per-table state
+The alternate view's header remains a visible interaction anchor. With
+anti-conceal disabled, cursor movement keeps the chosen table/list/chart view.
+With it enabled, overlapping its range restores the whole source table and
+hides its chart; leaving the range restores the view. Per-table state
 follows row insertions with native extmark anchors and resets on wipe/setup.
 Source bytes are unchanged. Views are bounded by `view_max_rows`; source edits
 can invalidate a selected table when the whole anchored range is removed.
@@ -184,9 +203,12 @@ fall back to normal text. Fractional sizes use the protocol's rational bounds.
 
 Stock tmux works with `set -g allow-passthrough on`. Inkstone reads the pane
 offset and top status-bar height and uses standard passthrough; it does not
-patch tmux or change its options. Raw text is erased before Neovim redraws and
-replayed afterward, with a 250ms recovery tick while placements exist. Floating
-windows and popup menus take precedence. Cursor entry restores source text;
+patch tmux or change its options. Cursor-only redraws leave unaffected overlays
+in place. The decoration provider tracks geometry and damaged source rows;
+redrawn text is cleared/repainted in one output packet, with a 250ms recovery
+tick while placements exist. Layout/content changes erase obsolete extents
+before rebuilding the native grid. Floating windows and popup menus take
+precedence. Cursor entry restores source only when anti-conceal is enabled;
 disable/setup/wipe stop owned placement timers. This is a terminal text overlay,
 so an unrelated repaint can briefly show normal text before recovery. The
 terminal tests cover multicell size metadata, tmux refresh, pane offsets, source
@@ -220,11 +242,12 @@ using buffer-local extmark anchors and is released on buffer wipe/setup.
 
 ## ACP tables
 
-When a table contains wrapped replacement rows, entering any row of that table
+With anti-conceal enabled, entering any row of a wrapped table
 restores the whole table's source. This removes its virtual rows, table borders
 and inline decorations together, so a long link destination cannot mix a raw
 source row with the rendered table layout. Moving outside restores the rendered
-table. This also applies with `anti_conceal.enabled = false`. While editing,
+table. With `anti_conceal.enabled = false`, the rendered layout stays visible
+under the cursor. While editing source,
 Neovim's normal source wrapping remains visible; `nowrap` clips source rows.
 Source bytes, yank and save are unchanged.
 

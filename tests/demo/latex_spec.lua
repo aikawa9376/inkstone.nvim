@@ -46,11 +46,12 @@ describe('demo/latex.md', function()
             conceal = '',
         })
 
-        marks:add(row:get(2), 0, {
+        marks:add({ 4, 6 }, { 0, 2 }, { conceal_lines = '' })
+        marks:add(7, 0, {
             virt_lines = {
                 { { block.output[1], 'RmMath' } },
-                { { block.output[2] .. ' ', 'RmMath' } },
-                { { block.output[3] .. ' ', 'RmMath' } },
+                { { block.output[2], 'RmMath' } },
+                { { block.output[3], 'RmMath' } },
             },
             virt_lines_above = true,
         })
@@ -64,9 +65,6 @@ describe('demo/latex.md', function()
             '  ' .. block.output[1],
             '  ' .. block.output[2],
             '  ' .. block.output[3],
-            '  $$',
-            '  ' .. block.input,
-            '  $$',
         })
     end)
 end)

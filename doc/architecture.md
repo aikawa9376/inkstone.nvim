@@ -78,15 +78,17 @@ same layout without changing a source buffer.
 Top-level paragraphs use `text/paragraph.lua` to join soft breaks, preserve hard
 breaks and wrap rendered inline chunks with the same Japanese layout kernel.
 `paragraph.wrap` is enabled by default. Lists/quotes, image anchors and converted
-math retain their existing layout. Cursor entry into any replaced source row
-restores the complete source paragraph. `Marks:replace` translates half-open
+math retain their existing layout. Anti-conceal overlapping a replaced source
+row restores the complete paragraph; disabling it retains the rendered view.
+`Marks:replace` translates half-open
 Tree-sitter ranges to the inclusive end-row semantics of `conceal_lines`;
 `lib/replacements.lua` anchors virtual output after the whole hidden range.
-Tables containing replaced rows restore the entire table's source when the
-cursor enters any table row, including fitting rows and the delimiter. Table
+When anti-conceal is enabled, tables containing replaced rows restore the entire
+table's source on cursor-range overlap, including fitting rows and the delimiter. Table
 marks carry their owning source range so adjacent blank-row borders disappear
 too; inline decorations inside the table are also hidden. Leaving the table
-restores the complete rendered layout, including when anti-conceal is disabled.
+restores the complete rendered layout. Disabled anti-conceal keeps table/list/
+chart/paragraph/typography/formula views rendered even on their source rows.
 Source editing uses Neovim's normal wrap/nowrap behavior.
 
 `core/folds.lua` discovers code fences, callouts and paired details blocks in
@@ -105,8 +107,8 @@ dependencies and remaining boundaries.
 extmark spans. It seeks real Markdown table nodes, avoiding fenced-code text.
 The card design follows LazyAgent's local column-heading/value layout; this
 implementation builds styled virtual rows from native cells instead of changing
-the buffer. A visible header anchors interactions. Moving into a body source
-row restores the whole source table and suppresses its graph. Source range
+the buffer. A visible header anchors interactions. Anti-conceal overlapping its
+range restores the whole source table and suppresses its graph. Source range
 deletion drops the mode instead of transferring it to a new table at that row.
 
 `text/chart.lua` consumes declarative numeric cells and emits bar/line SVG or
@@ -150,12 +152,16 @@ does not cancel the reply drain because an already sent query cannot be recalled
 
 The overlay bypasses tmux using standard passthrough after reading its pane
 coordinates, status placement and allow-passthrough option. It never patches
-or configures tmux. A decoration provider erases old multicell text before the
-native redraw and schedules replay after the grid flush. A scoped 250ms timer
+or configures tmux. A decoration provider tracks affected source rows and
+window geometry instead of erasing on every redraw. Cursor-only updates retain
+unchanged overlays. Changed geometry/content/entry sets erase old extents before
+native redraw; dirty rows repaint after the flush in one clear/draw packet.
+The scheduled painter skips identical frames unless damage/recovery forces it.
+A scoped 250ms timer
 recovers foreign repaint damage. Size-only changes also clear the previous
 multicell extent in the same output packet, even if grid extmarks were reused.
 Float/popup bounds and active tabs are checked
-before drawing; original source returns for cursor editing. Terminal geometry
+before drawing; cursor source restoration follows anti-conceal. Terminal geometry
 refreshes retain request waiters until the fallback frame is rebuilt. Setup,
 disable and wipe release owned placement timers and request waiters; a pending
 probe retains its bounded timer and input guard until reply or timeout.
@@ -178,6 +184,11 @@ contract and do not receive Markdown nodes through this fallback.
 `tests/rich.lua` checks real `latex2text` conversion with LaTeX trees filtered
 out, including inline/block output and source preservation. The converter
 determines flat versus multiline appearance; this path does not typeset images.
+The default centered layout replaces standalone multiline source blocks with
+`Marks:replace`, so raw LaTeX does not remain below the result. Explicit above/
+below previews and prose-sharing boundaries retain source. Conversion cache
+keys include the available converter chain: adding utftex cannot reuse cached
+flat latex2text output. Failed results keep source instead of rendering `error`.
 
 ## Next work
 

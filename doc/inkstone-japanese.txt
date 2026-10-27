@@ -27,12 +27,14 @@ LUA API
 <
 The API returns strings without editing any buffer. Width follows Neovim's
 strdisplaywidth(). Top-level paragraphs use this layout by default. Soft source
-newlines join; explicit Markdown hard breaks remain. Cursor entry restores the
-whole source paragraph. Set paragraph.wrap=false for Neovim's ordinary wrapping.
+newlines join; explicit Markdown hard breaks remain. With anti_conceal enabled,
+its cursor range restores the whole source paragraph. Set paragraph.wrap=false
+for Neovim's ordinary wrapping.
 
-Tables with wrapped replacement rows restore the whole source table when the
-cursor enters any table row. Borders and inline decorations return when the
-cursor leaves. This also applies with anti_conceal.enabled=false; normal source
+Tables with wrapped replacement rows restore the whole source table when
+anti_conceal's cursor range overlaps it. Borders and inline decorations return
+when the cursor leaves. With anti_conceal.enabled=false, rendered typography,
+paragraphs, table/list/chart views and math blocks remain visible under the cursor; source
 wrap/nowrap behavior remains visible while editing.
 Nested list/quote paragraphs, image anchors and converted math keep source rows.
 
@@ -71,8 +73,9 @@ typography.small=0.8. :Inkstone typography toggles it for the current buffer.
 Outside tmux, detection temporarily guards ttimeout/ttimeoutlen for up to 1.2s,
 then restores them, so split replies do not become mapped input at short timeouts.
 Stock tmux requires allow-passthrough on. Inkstone accounts for pane offsets
-and replays text after redraw; popup windows take precedence. Original source
-returns for cursor editing. Existing paragraph/table replacements retain their
+and replays damaged text after redraw; cursor-only updates do not erase intact
+overlays. Popup windows take precedence. Original source returns according to
+anti_conceal. Existing paragraph/table replacements retain their
 own layout. Unsupported terminals keep normal text. See demo/rich.md and
 doc/rendering-features.md for examples and limits.
 See doc/rendering-features.md for all options and graphics ownership with Snacks.
@@ -81,7 +84,9 @@ LATEX
 Install utftex or latex2text (Arch: python-pylatexenc). Markdown formula ranges
 allow Unicode conversion without a separate LaTeX parser. latex2text 2.x uses
 mostly flat text; utftex supports multiline layouts. Kitty math images are not
-part of this converter path. Try demo/latex.md with demo/rich_init.lua.
+part of this converter path. Centered standalone math blocks replace their raw
+source; above/below positions retain source plus preview. Converter changes
+invalidate old output. Try demo/latex.md with demo/rich_init.lua.
 
 PERFORMANCE
 Code body decoration is viewport-bounded. Width summaries invalidate on edits

@@ -87,6 +87,7 @@ function M.erase()
         out[#out + 1] = ('\27[%d;%dH\27[%dX'):format(rect.row, rect.col, rect.width)
     end
     M.drawn = {}
+    M.frame = nil
     if #out > 0 then send('\27' .. '7' .. table.concat(out) .. '\27' .. '8') end
 end
 
@@ -303,7 +304,12 @@ local function covered(win, row, col, height, width)
     return false
 end
 
-function M.paint()
+local function window_geometry(win, info, top)
+    return { top or info.topline - 1, vim.api.nvim_win_get_position(win),
+        vim.api.nvim_win_get_width(win), vim.api.nvim_win_get_height(win), info.textoff }
+end
+
+function M.paint(force)
     if M.painting or not M.tmux or not M.tmux.allowed or M.capability ~= true then return end
     M.painting = true
     local out, regions = {}, {}
@@ -319,6 +325,9 @@ function M.paint()
             and vim.api.nvim_win_get_tabpage(state.win) == vim.api.nvim_get_current_tabpage() then
             local win = state.win
             local info = vim.fn.getwininfo(win)[1]
+            -- Native sign/status columns can settle after on_win. Track the
+            -- geometry actually used for the overlay, not an earlier grid pass.
+            state.geometry = window_geometry(win, info)
             local top, bottom = info.winrow, info.winrow + info.height - 1
             local left, right = info.wincol + info.textoff, info.wincol + info.width - 1
             for _, entry in ipairs(state.entries) do
@@ -346,25 +355,56 @@ function M.paint()
             end
         end
     end
+    local frame = table.concat(out)
     M.drawn = regions
-    if #out > 0 then send('\27' .. '7' .. table.concat(out) .. '\27[0m\27' .. '8') end
+    if #out > 0 and (force or M.frame ~= frame) then
+        send('\27' .. '7' .. frame .. '\27[0m\27' .. '8')
+    end
+    M.frame = frame
     M.painting = false
 end
 
-function M.schedule()
+function M.schedule(force)
+    M.force = M.force or force
     if M.pending or not next(M.active) then return end
     M.pending = true
-    vim.schedule(function() M.pending = false; M.paint() end)
+    vim.schedule(function()
+        local repaint = M.force
+        M.pending, M.force = false, nil
+        M.paint(repaint)
+    end)
 end
 
 local function start()
     if M.timer then return end
     vim.api.nvim_set_decoration_provider(ns, {
-        on_start = function() if not M.painting then M.erase() end end,
-        on_end = M.schedule,
+        on_start = function() M.redrawing = false end,
+        on_win = function(_, win, buf, top)
+            local state = M.active[buf]
+            if not state or state.win ~= win then
+                if #M.drawn > 0 and vim.api.nvim_win_get_config(win).relative ~= '' then M.erase() end
+                return false
+            end
+            local geometry = window_geometry(win, vim.fn.getwininfo(win)[1], top)
+            if not vim.deep_equal(state.geometry, geometry) or vim.api.nvim_buf_get_changedtick(buf) ~= state.tick then
+                M.erase()
+                state.geometry = geometry
+                M.redrawing = true
+            end
+            return true
+        end,
+        on_line = function(_, win, buf, row)
+            local state = M.active[buf]
+            if state and state.win == win then
+                for _, entry in ipairs(state.entries) do
+                    if row == entry.row then M.redrawing = true; break end
+                end
+            end
+        end,
+        on_end = function() M.schedule(M.redrawing) end,
     })
     M.timer = vim.uv.new_timer()
-    M.timer:start(250, 250, vim.schedule_wrap(M.schedule))
+    M.timer:start(250, 250, vim.schedule_wrap(function() M.schedule(true) end))
 end
 
 function M.clear(buf, keep_waiter)
@@ -392,7 +432,11 @@ function M.update(context, extmarks)
         if M.active[context.buf] then M.clear(context.buf, context.config.typography.enabled ~= false) end
         return
     end
-    M.active[context.buf] = { win = context.win, tick = vim.api.nvim_buf_get_changedtick(context.buf), entries = entries }
+    local previous = M.active[context.buf]
+    local tick = vim.api.nvim_buf_get_changedtick(context.buf)
+    if previous and (previous.tick ~= tick or not vim.deep_equal(previous.entries, entries)) then M.erase() end
+    M.active[context.buf] = { win = context.win, tick = tick, entries = entries,
+        geometry = previous and previous.win == context.win and previous.geometry or nil }
     start()
     M.schedule()
 end

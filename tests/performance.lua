@@ -180,6 +180,10 @@ return function(test, equal, buffer)
         -- Header, delimiter, long row and a short row share the edit state.
         for row = 3, 6 do
             vim.api.nvim_win_set_cursor(0, { row, 0 })
+            ctx.config.anti_conceal.enabled = false
+            updater:display()
+            equal(#vim.api.nvim_buf_get_extmarks(buf, ui.ns, 0, -1, {}), #before)
+            ctx.config.anti_conceal = { enabled = true, above = 0, below = 0, disabled_modes = {} }
             updater:display()
             equal(#vim.api.nvim_buf_get_extmarks(buf, ui.ns, 0, -1, {}), 0)
         end

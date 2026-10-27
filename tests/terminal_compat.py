@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 import pty
 import select
+import shutil
 import signal
 import struct
 import subprocess
@@ -185,7 +186,7 @@ class TerminalTests(unittest.TestCase):
         self.assert_source()
 
     def test_paragraph_reflow_and_cursor_restore(self):
-        self.render(['BEFORE', '', ' 日本語の**段落**を', ' 文節で折り返します。  ', ' English words follow.', '', 'AFTER'], conceallevel=3)
+        self.render(['BEFORE', '', ' 日本語の**段落**を', ' 文節で折り返します。  ', ' English words follow.', '', 'AFTER'], conceallevel=3, anti_conceal=True)
         text = self.visible_text()
         self.assertIn('日本語の段落を文節で折り返します。', text)
         self.assertNotIn('**', text)
@@ -217,15 +218,22 @@ class TerminalTests(unittest.TestCase):
                              "require('inkstone.api').render({buf=vim.api.nvim_get_current_buf()}); vim.wait(100); vim.cmd('redraw!')")
                     self.pump()
                     text = self.visible_text()
-                    self.assertIn('| A | B |', text)
-                    self.assertNotIn('│', text)
-                    self.assertNotIn('┌', text)
+                    if anti_conceal:
+                        self.assertIn('| A | B |', text)
+                        self.assertNotIn('│', text)
+                        self.assertNotIn('┌', text)
+                    else:
+                        self.assertIn('│', text)
+                        self.assertNotIn('https://example.org/', text)
                     self.assert_source()
                 self.lua("vim.api.nvim_win_set_cursor(0,{5,20}); vim.api.nvim_buf_set_text(0,4,20,4,20,{'changed-'}); "
                          "require('inkstone.api').render({buf=vim.api.nvim_get_current_buf()}); vim.wait(100); vim.cmd('redraw!')")
                 self.lines[4] = self.lines[4][:20] + 'changed-' + self.lines[4][20:]
                 self.pump()
-                self.assertNotIn('│', self.visible_text())
+                if anti_conceal:
+                    self.assertNotIn('│', self.visible_text())
+                else:
+                    self.assertIn('│', self.visible_text())
                 self.assert_source()
                 self.lua("vim.api.nvim_win_set_cursor(0,{1,0}); require('inkstone.api').render({buf=vim.api.nvim_get_current_buf()}); "
                          "vim.wait(100); vim.cmd('normal! ggzt'); vim.cmd('redraw!')")
@@ -265,10 +273,16 @@ class TerminalTests(unittest.TestCase):
         self.lua("vim.api.nvim_win_set_cursor(0,{5,0}); require('inkstone.api').render({buf=vim.api.nvim_get_current_buf()}); "
                  "vim.wait(100); vim.cmd('redraw!')")
         self.pump()
+        self.assertIn('Table · list', self.visible_text())
+        self.assertIn('• Name', self.visible_text())
+        self.lua("require('inkstone.state').get(vim.api.nvim_get_current_buf()).anti_conceal={enabled=true,above=0,below=0,disabled_modes={}}; "
+                 "require('inkstone.api').render({buf=vim.api.nvim_get_current_buf()}); vim.wait(100); vim.cmd('redraw!')")
+        self.pump()
         self.assertIn('| Name | Before | After |', self.visible_text())
         self.assertNotIn('Table · list', self.visible_text())
         self.assertNotIn('• Name', self.visible_text())
-        self.lua("vim.api.nvim_win_set_cursor(0,{3,0}); require('inkstone.api').render({buf=vim.api.nvim_get_current_buf()}); vim.wait(100)")
+        self.lua("require('inkstone.state').get(vim.api.nvim_get_current_buf()).anti_conceal.enabled=false; "
+                 "vim.api.nvim_win_set_cursor(0,{3,0}); require('inkstone.api').render({buf=vim.api.nvim_get_current_buf()}); vim.wait(100)")
         self.lua("require('inkstone.api').toggle_chart(); vim.wait(150); vim.cmd('redraw!')")
         self.pump()
         text = self.visible_text()
@@ -303,9 +317,19 @@ class TerminalTests(unittest.TestCase):
         self.lua("vim.api.nvim_win_set_cursor(0,{3,0}); require('inkstone.api').render({buf=vim.api.nvim_get_current_buf()}); "
                  "vim.wait(150); vim.cmd('redraw!')")
         self.pump(.3)
+        self.assertTrue(any(cell['scale'] == 2 for cell in scales()), self.visible_text())
+        self.lua("require('inkstone.state').get(vim.api.nvim_get_current_buf()).anti_conceal={enabled=true,above=0,below=0,disabled_modes={}}; "
+                 "require('inkstone.api').render({buf=vim.api.nvim_get_current_buf()}); vim.wait(100); vim.cmd('redraw!')")
+        self.pump(.3)
         self.assertIn('# Large 日本語', self.visible_text())
         self.assertFalse(any(cell['scale'] == 2 for cell in scales()), self.visible_text())
-        self.lua("vim.api.nvim_win_set_cursor(0,{1,0}); require('inkstone.api').render({buf=vim.api.nvim_get_current_buf()}); "
+        self.lua("vim.api.nvim_win_set_cursor(0,{5,0}); require('inkstone.api').render({buf=vim.api.nvim_get_current_buf()}); "
+                 "vim.wait(100); vim.cmd('redraw!')")
+        self.pump(.3)
+        self.assertIn('<small>Small</small>', self.visible_text())
+        self.assertFalse(any(cell['subscale_n'] == 4 and cell['subscale_d'] == 5 for cell in scales()), self.visible_text())
+        self.lua("require('inkstone.state').get(vim.api.nvim_get_current_buf()).anti_conceal.enabled=false; "
+                 "vim.api.nvim_win_set_cursor(0,{1,0}); require('inkstone.api').render({buf=vim.api.nvim_get_current_buf()}); "
                  "vim.wait(150); vim.cmd('redraw!')")
         self.pump(.3)
         self.assertTrue(any(cell['scale'] == 2 for cell in scales()), self.visible_text())
@@ -323,6 +347,22 @@ class TerminalTests(unittest.TestCase):
     def test_kitty_font_sizes_with_extended_keys(self):
         self.tmux('set-option', '-s', 'extended-keys', 'on')
         self.test_kitty_font_sizes_repaint_and_cursor_restore()
+
+    def test_cursor_movement_keeps_typography_without_erase_frames(self):
+        self.tmux('set-option', '-g', 'allow-passthrough', 'on')
+        self.render(['BEFORE', '', '# Large heading', '', 'one', 'two', 'three', 'four', 'five', 'AFTER'])
+        self.lua("vim.env.KITTY_WINDOW_ID='1'; local c=require('inkstone.state').get(vim.api.nvim_get_current_buf()); "
+                 "c.typography.enabled=true; require('inkstone.api').render({buf=vim.api.nvim_get_current_buf()}); vim.wait(150)")
+        self.pump(.3)
+        self.lua("local t=require('inkstone.core.typography'); local erase=t.erase; _G.typography_erases=0; "
+                 "t.erase=function(...) _G.typography_erases=_G.typography_erases+1; return erase(...) end")
+        for row in (6, 7, 8, 3, 9, 6):
+            self.lua('vim.api.nvim_win_set_cursor(0,{' + str(row) + ',0})')
+            self.pump(.04)
+            self.assertTrue(any((cell.get('mcd') or {}).get('scale') == 2
+                                for line in range(24) for cell in self.screen.cpu_cells(line)), self.visible_text())
+        self.assertEqual(int(self.lua('print(_G.typography_erases)')), 0)
+        self.assert_source()
 
     def test_fragmented_version_reply_never_becomes_mapped_input(self):
         self.tmux('set-option', '-g', 'allow-passthrough', 'on')
@@ -351,12 +391,37 @@ class TerminalTests(unittest.TestCase):
         self.test_fragmented_version_reply_never_becomes_mapped_input()
 
     def test_latex2text_demo_without_latex_parser(self):
-        if not Path('/usr/bin/latex2text').is_file():
+        if not shutil.which('latex2text'):
             self.skipTest('latex2text is not installed')
         self.render(Path(ROOT / 'demo/latex.md').read_text().splitlines())
+        self.lua("require('inkstone.state').get(vim.api.nvim_get_current_buf()).latex.converter='latex2text'; "
+                 "require('inkstone.api').render({buf=vim.api.nvim_get_current_buf()}); vim.wait(100); vim.cmd('redraw!')")
+        self.pump()
         text = self.visible_text()
         self.assertIn('√(3x-1)+(1+x)^2', text)
         self.assertIn('lim_n→∞ (1 + 1/n)^n', text)
+        self.assert_source()
+
+    def test_utftex_rich_math_has_no_source_tails(self):
+        if not shutil.which('utftex'):
+            self.skipTest('utftex is not installed')
+        self.render(Path(ROOT / 'demo/latex.md').read_text().splitlines(), conceallevel=3)
+        text = self.visible_text()
+        self.assertIn('lim', text)
+        self.assertIn('n→∞', text)
+        self.assertIn('─', text)
+        self.assertNotIn('\\lim', text)
+        self.assertNotIn('\\sqrt', text)
+        self.assertNotIn('$$', text)
+        self.lua("vim.api.nvim_win_set_cursor(0,{6,0}); require('inkstone.api').render({buf=vim.api.nvim_get_current_buf()}); "
+                 "vim.wait(100); vim.cmd('redraw!')")
+        self.pump()
+        self.assertNotIn('\\lim', self.visible_text())
+        self.lua("require('inkstone.state').get(vim.api.nvim_get_current_buf()).anti_conceal={enabled=true,above=0,below=0,disabled_modes={}}; "
+                 "require('inkstone.api').render({buf=vim.api.nvim_get_current_buf()}); vim.wait(100); vim.cmd('redraw!')")
+        self.pump()
+        self.assertIn('\\lim', self.visible_text())
+        self.assertNotIn('n→∞', self.visible_text())
         self.assert_source()
 
     def test_kitty_graphics_chart_and_viewer(self):
