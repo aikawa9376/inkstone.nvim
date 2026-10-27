@@ -135,6 +135,12 @@ Kitty 0.40+ and Neovim 0.12+ can display genuinely larger/smaller text using
 the displayed text size, with original Markdown retained for editing/yank/save.
 Support requires a positive Kitty XTVERSION reply; other terminals and headless
 sessions keep normal text and do not reserve extra rows.
+While awaiting that reply (up to 1.2 seconds), Inkstone temporarily enables
+`ttimeout` and raises `ttimeoutlen` to at least 1200ms so fragmented terminal
+responses cannot be mistaken for mapped keys with settings such as
+`ttimeoutlen=1`. It restores the previous values after the reply or timeout,
+preserving changes made while waiting. Disabling a buffer during the query
+still drains the pending reply before releasing this guard.
 
 ```lua
 require('inkstone').setup({

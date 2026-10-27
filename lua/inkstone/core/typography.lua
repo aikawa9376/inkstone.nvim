@@ -2,6 +2,7 @@
 -- before native redraws and replay it after the grid flush. Never change tmux.
 local M = { active = {}, drawn = {}, tmux = nil, pending = false }
 local ns = vim.api.nvim_create_namespace('inkstone.typography')
+local probe_timeout = 1200
 local function kitty()
     return vim.env.KITTY_WINDOW_ID ~= nil or vim.env.TERM_PROGRAM == 'kitty'
 end
@@ -28,10 +29,18 @@ end
 function M.probe()
     if M.probing or M.capability ~= nil then return end
     M.probing = true
+    -- A fragmented DCS reply becomes mapped keys if the TUI's key-code timer
+    -- expires (notably with ttimeoutlen=1). Protect only the query's lifetime.
+    local input = { ttimeout = vim.o.ttimeout, ttimeoutlen = vim.o.ttimeoutlen }
+    local guarded = math.max(probe_timeout, input.ttimeoutlen)
+    vim.o.ttimeoutlen, vim.o.ttimeout = guarded, true
     local autocmd, timer
     local function done(supported)
         if not M.probing then return end
         M.probing, M.capability = false, supported
+        -- Preserve any option changes the user made while the query was pending.
+        if vim.o.ttimeoutlen == guarded then vim.o.ttimeoutlen = input.ttimeoutlen end
+        if vim.o.ttimeout then vim.o.ttimeout = input.ttimeout end
         if timer and not timer:is_closing() then timer:stop(); timer:close() end
         if autocmd then pcall(vim.api.nvim_del_autocmd, autocmd) end
         M.probe_timer, M.probe_autocmd = nil, nil
@@ -44,20 +53,14 @@ function M.probe()
         if major then done(tonumber(major) > 0 or tonumber(minor) >= 40)
         elseif sequence:match('^\27P>|') then done(false) end
     end })
-    timer = vim.defer_fn(function() done(false) end, 1200)
+    timer = vim.defer_fn(function() done(false) end, probe_timeout)
     M.probe_timer, M.probe_autocmd = timer, autocmd
     send('\27[>0q')
 end
 
-function M.cancel_probe()
-    if M.probe_timer and not M.probe_timer:is_closing() then M.probe_timer:stop(); M.probe_timer:close() end
-    if M.probe_autocmd then pcall(vim.api.nvim_del_autocmd, M.probe_autocmd) end
-    M.probing, M.probe_timer, M.probe_autocmd = false, nil, nil
-end
-
 function M.retry()
     if M.capability == true and M.tmux and M.tmux.allowed then return end
-    M.cancel_probe()
+    -- Reuse an in-flight query: its reply cannot be recalled or safely ignored.
     M.capability, M.tmux = nil, nil
 end
 
@@ -345,7 +348,8 @@ function M.clear(buf, keep_waiter)
     M.erase()
     if buf then M.active[buf] = nil else M.active = {} end
     if buf and M.waiters and not keep_waiter then M.waiters[buf] = nil elseif not buf then M.waiters = {} end
-    if not next(M.waiters or {}) then M.cancel_probe() end
+    -- A pending terminal reply must still drain with its input guard held.
+    -- The probe's bounded timer releases it even when no buffers remain.
     if not next(M.active) then
         if M.timer then M.timer:stop(); M.timer:close(); M.timer = nil end
         vim.api.nvim_set_decoration_provider(ns, {})

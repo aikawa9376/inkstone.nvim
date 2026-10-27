@@ -76,7 +76,15 @@ class TerminalTests(unittest.TestCase):
             # The native parser has no PTY response callback. Supply its known
             # XTVERSION identity when an application probes the real protocol.
             if b'\x1b[>0q' in data:
-                os.write(self.fd, b'\x1bP>|' + getattr(self, 'terminal_version', b'kitty(0.49.2)') + b'\x1b\\')
+                response = b'\x1bP>|' + getattr(self, 'terminal_version', b'kitty(0.49.2)')
+                if getattr(self, 'fragment_response', False):
+                    os.write(self.fd, response[:6])
+                    time.sleep(.03)
+                    os.write(self.fd, response[6:])
+                    time.sleep(.03)
+                    os.write(self.fd, b'\x1b\\')
+                else:
+                    os.write(self.fd, response + b'\x1b\\')
             while data:
                 used = self.screen.test_commit_write_buffer(data, self.screen.test_create_write_buffer())
                 self.screen.test_parse_written_data()
@@ -314,6 +322,25 @@ class TerminalTests(unittest.TestCase):
     def test_kitty_font_sizes_with_extended_keys(self):
         self.tmux('set-option', '-s', 'extended-keys', 'on')
         self.test_kitty_font_sizes_repaint_and_cursor_restore()
+
+    def test_fragmented_version_reply_never_becomes_mapped_input(self):
+        self.tmux('set-option', '-g', 'allow-passthrough', 'on')
+        self.lua("vim.env.KITTY_WINDOW_ID=nil; vim.env.TERM_PROGRAM=nil")
+        self.render(['BEFORE', '', '# Large heading', '', 'BODY', '', 'AFTER'])
+        self.fragment_response = True
+        self.lua("vim.o.ttimeout=true; vim.o.ttimeoutlen=1; _G.version_puts=0; "
+                 "vim.keymap.set('n','P',function() _G.version_puts=_G.version_puts+1 end); "
+                 "vim.env.KITTY_WINDOW_ID='1'; require('inkstone.api').render({buf=vim.api.nvim_get_current_buf()})")
+        for attempt in range(2):
+            if attempt:
+                self.lua("require('inkstone.api').typography(); require('inkstone.core.typography').capability=nil; "
+                         "require('inkstone.api').typography()")
+            self.pump(.5)
+            self.assert_source()
+            state = json.loads(self.lua("print(vim.json.encode({vim.api.nvim_get_mode().mode,_G.version_puts,vim.o.ttimeoutlen}))"))
+            self.assertEqual(state, ['n', 0, 1])
+            self.assertTrue(any((cell.get('mcd') or {}).get('scale') == 2
+                                for row in range(24) for cell in self.screen.cpu_cells(row)), self.visible_text())
 
     def test_kitty_graphics_chart_and_viewer(self):
         snacks = Path(os.environ.get('INKSTONE_SNACKS_RTP', Path.home() / '.local/share/nvim/lazy/snacks.nvim'))

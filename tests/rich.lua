@@ -196,6 +196,64 @@ return function(test, equal, buffer)
         vim.api.nvim_buf_delete(buf, { force = true })
     end)
 
+    test('terminal probe guards fragmented replies and drains after disable or retry', function()
+        local typography = require('inkstone.core.typography')
+        local send, capability = vim.api.nvim_ui_send, typography.capability
+        local timeout, length = vim.o.ttimeout, vim.o.ttimeoutlen
+        local queries = 0
+        vim.api.nvim_ui_send = function() queries = queries + 1 end
+        vim.o.ttimeout, vim.o.ttimeoutlen = true, 1
+        typography.capability, typography.waiters = nil, {}
+        typography.probe()
+        assert(vim.o.ttimeout and vim.o.ttimeoutlen >= 1200)
+        typography.clear()
+        typography.retry()
+        typography.probe()
+        equal(queries, 1)
+        assert(typography.probing and vim.o.ttimeoutlen >= 1200)
+        vim.api.nvim_exec_autocmds('TermResponse', { data = { sequence = '\27P>|kitty(0.49.2)' } })
+        equal(typography.capability, true)
+        equal({ typography.probing, vim.o.ttimeout, vim.o.ttimeoutlen }, { false, true, 1 })
+        equal(typography.probe_timer, nil)
+        equal(typography.probe_autocmd, nil)
+        vim.api.nvim_ui_send, typography.capability = send, capability
+        vim.o.ttimeout, vim.o.ttimeoutlen = timeout, length
+    end)
+
+    test('terminal probe preserves option changes made while waiting', function()
+        local typography = require('inkstone.core.typography')
+        local send, capability = vim.api.nvim_ui_send, typography.capability
+        local timeout, length = vim.o.ttimeout, vim.o.ttimeoutlen
+        vim.api.nvim_ui_send = function() end
+        vim.o.ttimeout, vim.o.ttimeoutlen = false, -1
+        typography.capability, typography.waiters = nil, {}
+        typography.probe()
+        assert(vim.o.ttimeout and vim.o.ttimeoutlen >= 1200)
+        vim.o.ttimeout, vim.o.ttimeoutlen = false, 2500
+        vim.api.nvim_exec_autocmds('TermResponse', { data = { sequence = '\27P>|kitty(0.39.0)' } })
+        equal(typography.capability, false)
+        equal({ vim.o.ttimeout, vim.o.ttimeoutlen }, { false, 2500 })
+        vim.api.nvim_ui_send, typography.capability = send, capability
+        vim.o.ttimeout, vim.o.ttimeoutlen = timeout, length
+    end)
+
+    test('unanswered terminal probes release their input guard on timeout', function()
+        local typography = require('inkstone.core.typography')
+        local send, capability = vim.api.nvim_ui_send, typography.capability
+        local timeout, length = vim.o.ttimeout, vim.o.ttimeoutlen
+        vim.api.nvim_ui_send = function() end
+        vim.o.ttimeout, vim.o.ttimeoutlen = false, -1
+        typography.capability, typography.waiters = nil, {}
+        typography.probe()
+        assert(vim.wait(1600, function() return not typography.probing end, 5))
+        equal(typography.capability, false)
+        equal({ vim.o.ttimeout, vim.o.ttimeoutlen }, { false, -1 })
+        equal(typography.probe_timer, nil)
+        equal(typography.probe_autocmd, nil)
+        vim.api.nvim_ui_send, typography.capability = send, capability
+        vim.o.ttimeout, vim.o.ttimeoutlen = timeout, length
+    end)
+
     external_test('PDF viewer turns real pages and rejects the end of the document', { 'magick', 'gs' }, function()
         local media, viewer = require('inkstone.core.media'), require('inkstone.core.viewer')
         local backend, notify = media.backend, vim.notify

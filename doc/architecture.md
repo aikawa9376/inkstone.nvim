@@ -136,6 +136,12 @@ Inline code containing those literal tags is not interpreted as markup.
 Payloads contain sanitized text and grapheme-safe chunks within OSC 66's bounds.
 Only a positive Kitty 0.40+ XTVERSION response enables output. Neovim 0.12's
 `nvim_ui_send` is required; unsupported/headless cases retain normal rendering.
+The XTVERSION probe temporarily holds `ttimeout=true` and `ttimeoutlen>=1200`
+until its reply or 1.2-second timeout. Without this guard, split DCS input can
+expire into ordinary mapped keys and modify the source when users configure
+very short key-code timeouts. It restores only options still matching its
+assigned values. Retries reuse the in-flight query; clearing request waiters
+does not cancel the reply drain because an already sent query cannot be recalled.
 
 The overlay bypasses tmux using standard passthrough after reading its pane
 coordinates, status placement and allow-passthrough option. It never patches
@@ -146,7 +152,8 @@ multicell extent in the same output packet, even if grid extmarks were reused.
 Float/popup bounds and active tabs are checked
 before drawing; original source returns for cursor editing. Terminal geometry
 refreshes retain request waiters until the fallback frame is rebuilt. Setup,
-disable and wipe release owned placement/probe timers.
+disable and wipe release owned placement timers and request waiters; a pending
+probe retains its bounded timer and input guard until reply or timeout.
 
 The source bytes and normal grid remain authoritative. This is a scoped
 terminal overlay, not a replacement Neovim TUI, and brief fallback/flicker during
