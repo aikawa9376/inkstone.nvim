@@ -77,13 +77,21 @@ end
 ---@param node render.md.Node
 ---@param lines render.md.mark.Line[]
 function Marks:replace(config, node, lines)
+    -- conceal_lines hides the end row even at column zero. Tree-sitter ranges
+    -- are half-open, so keep the following blank/visible anchor row outside.
+    local end_row = node.end_row
+    local end_col = node.end_col
+    if end_row > node.start_row and end_col == 0 then
+        end_row = end_row - 1
+        end_col = #(vim.api.nvim_buf_get_lines(self.context.buf, end_row, end_row + 1, false)[1] or '')
+    end
     self:insert(config, {
         conceal = true,
         start_row = node.start_row,
         start_col = node.start_col,
         opts = {
-            end_row = node.end_row,
-            end_col = node.end_col,
+            end_row = end_row,
+            end_col = end_col,
             conceal_lines = '',
         },
         replace = lines,

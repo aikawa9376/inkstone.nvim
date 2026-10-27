@@ -69,6 +69,14 @@ function M.preview()
     require('inkstone.core.preview').open()
 end
 
+function M.toggle_fold()
+    require('inkstone.core.folds').toggle()
+end
+
+function M.media()
+    require('inkstone.core.media').open()
+end
+
 function M.log()
     require('inkstone.core.log').open()
 end

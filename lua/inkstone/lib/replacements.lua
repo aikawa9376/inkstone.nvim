@@ -23,9 +23,6 @@ function M.resolve(visible, line_count)
     for _, mark in ipairs(visible) do
         if mark.opts.conceal_lines then
             local end_row = mark.opts.end_row or mark.start_row
-            if end_row > mark.start_row and mark.opts.end_col == 0 then
-                end_row = end_row - 1
-            end
             for row = mark.start_row, end_row do
                 hidden[row] = true
             end
@@ -34,7 +31,8 @@ function M.resolve(visible, line_count)
 
     local groups = {} ---@type render.md.Mark[]
     for _, mark in ipairs(marks) do
-        local row = mark.start_row + 1
+        local row = mark.opts.end_row or mark.start_row
+        row = row + 1
         while row < line_count and hidden[row] do
             row = row + 1
         end

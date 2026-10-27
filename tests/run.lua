@@ -79,9 +79,12 @@ test('compatibility overlays are viewport bounded and respect concealed regions'
             replace = { { { 'ｳ', 'Normal' }, { 'ﾞ', 'String' } } } },
     }
     require('inkstone.render.compat').apply(context, marks)
-    equal(#marks, 3)
+    equal(#marks, 4)
     equal(marks[3].start_row, 0)
     equal(marks[3].opts.virt_text[1][1], 'ガ')
+    -- A concealed replacement row can be restored by cursor navigation.
+    equal(marks[4].start_row, 2)
+    equal(marks[4].opts.virt_text[1][1], 'ヴ')
     equal(marks[2].replace, { { { 'ヴ', 'Normal' } } })
     equal(vim.api.nvim_buf_get_lines(buf, 0, -1, false), { 'ｶﾞ', 'ﾊﾟ', 'ｳﾞ', 'ｷﾞ' })
     local extmark = require('inkstone.lib.extmark').new(marks[3])
@@ -265,4 +268,5 @@ test('public command, asynchronous UI and wipe cleanup', function()
     assert(ui.cache[buf] == nil and state.cache[buf] == nil and Context.cache[buf] == nil)
     assert(not require('inkstone.core.manager').attached(buf))
 end)
+require('tests.features')(test, equal, buffer)
 print(('Inkstone: %d integration contracts passed'):format(passed))

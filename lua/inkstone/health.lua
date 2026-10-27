@@ -17,7 +17,7 @@ M.version = '8.14.1'
 
 function M.check()
     M.start('versions')
-    M.neovim('0.9', '0.11')
+    M.neovim('0.11', '0.11')
     vim.health.ok('tree-sitter ABI: ' .. vim.treesitter.language_version)
     vim.health.ok('plugin: ' .. M.version)
 
@@ -66,6 +66,23 @@ function M.check()
         else
             latex_works = true
             vim.health.ok('using: ' .. vim.inspect(cmds))
+        end
+    end
+
+    if config.media.enabled then
+        M.start('media (optional)')
+        local ok = pcall(require, 'snacks')
+        if ok then vim.health.ok('snacks.nvim image backend available')
+        else vim.health.warn('snacks.nvim is required to display images; source text remains visible') end
+        for _, kind in ipairs({ 'mermaid', 'plantuml' }) do
+            if config.media[kind] then
+                local command = config.media[kind .. '_command']
+                if command[1] and vim.fn.executable(command[1]) == 1 then
+                    vim.health.ok(kind .. ': ' .. table.concat(command, ' '))
+                else
+                    vim.health.warn(kind .. ' converter unavailable; its fence remains readable as code')
+                end
+            end
         end
     end
 

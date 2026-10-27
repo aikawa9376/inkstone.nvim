@@ -49,9 +49,23 @@ Widths use Neovim's display-width function. Table wrapping preserves inline
 highlight segments while rebuilding virtual rows; `inkstone.text` exposes the
 same layout without changing a source buffer.
 
-Normal paragraphs currently retain Neovim's existing wrap behavior. A separate
-preview layout or careful virtual-row replacement is needed for Japanese
-paragraph reflow without changing source text or breaking cursor mapping.
+Top-level paragraphs use `text/paragraph.lua` to join soft breaks, preserve hard
+breaks and wrap rendered inline chunks with the same Japanese layout kernel.
+`paragraph.wrap` is enabled by default. Lists/quotes, image anchors and converted
+math retain their existing layout. Cursor entry into any replaced source row
+restores the complete source paragraph. `Marks:replace` translates half-open
+Tree-sitter ranges to the inclusive end-row semantics of `conceal_lines`;
+`lib/replacements.lua` anchors virtual output after the whole hidden range.
+
+`core/folds.lua` discovers code fences, callouts and paired details blocks in
+Markdown trees. It filters hidden child decorations and emits conceal/summary
+marks; explicit toggle state follows source edits via a separate extmark
+namespace. It does not set the user's foldmethod. `core/media.lua` collects
+visible image/diagram requests after folding, uses async local conversion and
+delegates graphics to Snacks. Pending placements reject edited/wiped buffers;
+disable/setup/wipe close placements and cancel jobs. Native Snacks document
+placements are not duplicated. See `doc/rendering-features.md` for configuration,
+dependencies and remaining boundaries.
 
 ## Next work
 
@@ -61,7 +75,7 @@ paragraph reflow without changing source text or breaking cursor mapping.
   unchanged extmarks.
 - Shared parser timeout/retry policy that does not alter other plugins' native
   highlighters. Async time slicing changes responsiveness, not native parse cost.
-- Japanese paragraph layout and source-to-display navigation.
+- Extend paragraph layout to nested lists/quotes and richer display navigation.
 - Optional native layout kernel only after measurements justify the cost. Keep
   Neovim display-width parity, pass incremental data, reject stale results and
   retain a working Lua fallback. A worker cannot share Neovim-owned TSNode pointers.

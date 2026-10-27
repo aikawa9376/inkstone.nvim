@@ -10,6 +10,7 @@ SETUP
       wrap = true,
       japanese = { enabled = true, budoux = true },
     },
+    paragraph = { wrap = true, japanese = { enabled = true, budoux = true } },
   })
 <
 BudouX is bundled and runs offline. Japanese table wrapping prefers phrase
@@ -25,7 +26,24 @@ LUA API
   local lines = text.wrap('「日本語」の表を、読みやすく。', 12)
 <
 The API returns strings without editing any buffer. Width follows Neovim's
-strdisplaywidth(). Normal Markdown paragraphs retain Neovim's ordinary wrapping.
+strdisplaywidth(). Top-level paragraphs use this layout by default. Soft source
+newlines join; explicit Markdown hard breaks remain. Cursor entry restores the
+whole source paragraph. Set paragraph.wrap=false for Neovim's ordinary wrapping.
+Nested list/quote paragraphs, image anchors and converted math keep source rows.
+
+MEDIA AND FOLDS
+:Inkstone media opens the image/diagram at or before the cursor in a floating
+view (q closes it). Images use the optional Snacks image backend. Mermaid and
+PlantUML conversion additionally require the local mmdc/plantuml executables.
+Conversion runs asynchronously; missing dependencies leave readable source.
+Use :checkhealth inkstone and :checkhealth snacks to inspect dependencies.
+
+:Inkstone toggle_fold toggles the containing code block, callout or details.
+<Plug>(InkstoneToggleFold) can be mapped without replacing existing keybindings.
+The side preview maps za and <CR>. Callout [!NOTE]- and details without open start
+collapsed; code blocks start expanded. Source bytes and foldmethod are unchanged.
+Set folds.enabled=false or media.enabled=false to disable these features.
+See doc/rendering-features.md for all options and graphics ownership with Snacks.
 
 PERFORMANCE
 Code body decoration is viewport-bounded. Width summaries invalidate on edits

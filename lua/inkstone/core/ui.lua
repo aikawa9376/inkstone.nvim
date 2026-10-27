@@ -16,6 +16,10 @@ M.cache = {}
 
 ---called from state on setup
 function M.setup()
+    require('inkstone.core.media').reset()
+    local folds = require('inkstone.core.folds')
+    for buf in pairs(folds.trees) do folds.clear(buf) end
+    for buf in pairs(folds.cache) do folds.clear(buf) end
     for _, decorator in pairs(M.cache) do decorator:dispose() end
     -- clear marks and reset cache
     for _, buf in ipairs(vim.api.nvim_list_bufs()) do
@@ -109,6 +113,7 @@ function Updater:run()
         end
     end
     if not render then
+        require('inkstone.core.media').clear(self.buf)
         self:clear()
     else
         self:render()
@@ -174,6 +179,8 @@ function Updater:display()
     self.decorator:display(M.ns, function(extmark)
         return self:hide(extmark, range)
     end)
+    local context = Context.get(self.buf)
+    require('inkstone.core.media').update(context, range)
     state.on.render({ buf = self.buf, win = self.win })
 end
 
@@ -211,7 +218,8 @@ function Updater:hide(extmark, range)
     -- virtual row -> no editable screen cells -> must hide
     if mark.replace then
         local row = env.row.get(self.buf, self.win)
-        if row and row == mark.start_row then
+        local bottom = mark.opts.end_row or mark.start_row
+        if row and row >= mark.start_row and row <= bottom then
             return true
         end
     end

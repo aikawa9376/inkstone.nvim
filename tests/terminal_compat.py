@@ -78,12 +78,12 @@ class TerminalTests(unittest.TestCase):
                 self.screen.test_parse_written_data()
                 data = data[used:]
 
-    def render(self, lines, cell='trimmed', wrap=False, enabled=True):
+    def render(self, lines, cell='trimmed', wrap=False, enabled=True, conceallevel=2):
         self.lines = lines
         body = 'vim.opt.rtp:prepend(' + json.dumps(str(ROOT)) + '); '
         body += "require('inkstone').setup({anti_conceal={enabled=false}, display_compat={enabled="
         body += str(enabled).lower() + "}, pipe_table={cell='" + cell + "',wrap=" + str(wrap).lower()
-        body += "}, code={sign=false}, win_options={conceallevel={default=0,rendered=2}}}); "
+        body += "}, code={sign=false}, win_options={conceallevel={default=0,rendered=" + str(conceallevel) + "}}}); "
         body += 'vim.api.nvim_buf_set_lines(0,0,-1,false,vim.json.decode('
         body += json.dumps(json.dumps(lines, ensure_ascii=False), ensure_ascii=False) + ')); '
         body += "vim.bo.filetype='markdown'; vim.treesitter.start(0,'markdown'); vim.api.nvim_win_set_cursor(0,{1,0}); "
@@ -146,6 +146,60 @@ class TerminalTests(unittest.TestCase):
         self.assertEqual(json.loads(copied), source + '\n')
         self.render(['BEFORE', source, 'AFTER'], enabled=False)
         self.assertIn(source, self.visible_text())
+        self.assert_source()
+
+    def test_acp_indented_table(self):
+        fcntl.ioctl(self.fd, termios.TIOCSWINSZ, struct.pack('HHHH', 24, 60, 0, 0))
+        self.screen.resize(24, 60)
+        os.kill(self.pid, signal.SIGWINCH)
+        self.pump()
+        self.render([
+            'BEFORE', '',
+            ' | 比較対象 | Inkstone の状況 |',
+            ' |---|---|',
+            ' | [render-markdown.nvim](https://github.com/MeanderingProgrammer/render-markdown.nvim#features) | ベースの主要機能は継承。上流の最新変更すべてとの一致は未確認 |',
+            ' | [markview.nvim](https://github.com/OXY2DEV/markview.nvim#-complete-feature-list) | 基本描画は広く対応。HTML の標準装飾、絵文字略記・文字参照、Obsidian タグ、Typst／AsciiDoc などで差がある |',
+            ' | [md-render.nvim](https://github.com/delphinus/md-render.nvim#highlights) | 通常段落の日本語折り返し、画像・動画、Mermaid／PlantUML、操作できる折りたたみが未対応 |',
+            '', 'AFTER',
+        ], wrap=True, conceallevel=3)
+        bars = []
+        for row in range(24):
+            cols = [col for col, cell in enumerate(self.screen.cpu_cells(row)) if cell['text'] in ('│', '┌', '┬', '┐', '├', '┼', '┤', '└', '┴', '┘')]
+            if len(cols) == 3:
+                bars.append(cols)
+        self.assertGreater(len(bars), 4, self.visible_text())
+        self.assertTrue(all(row == bars[0] for row in bars), (bars, self.visible_text()))
+        self.assert_source()
+
+    def test_paragraph_reflow_and_cursor_restore(self):
+        self.render(['BEFORE', '', ' 日本語の**段落**を', ' 文節で折り返します。  ', ' English words follow.', '', 'AFTER'], conceallevel=3)
+        text = self.visible_text()
+        self.assertIn('日本語の段落を文節で折り返します。', text)
+        self.assertNotIn('**', text)
+        self.assertIn(' English words follow.', text)
+        self.lua("vim.api.nvim_win_set_cursor(0,{4,0}); require('inkstone.api').render({buf=vim.api.nvim_get_current_buf()}); vim.wait(100); vim.cmd('redraw!')")
+        self.pump()
+        self.assertIn('日本語の', self.visible_text())
+        self.assertNotIn('日本語の段落を文節で折り返します。', self.visible_text())
+        self.assert_source()
+        self.lua("vim.api.nvim_win_set_cursor(0,{1,0}); require('inkstone.api').render({buf=vim.api.nvim_get_current_buf()}); vim.wait(100); vim.cmd('redraw!')")
+        self.pump()
+        self.assertIn('日本語の段落を文節で折り返します。', self.visible_text())
+
+    def test_details_callout_and_code_folds(self):
+        self.render(['BEFORE', '', '<details>', '<summary>Details title</summary>', '', 'Secret detail body', '', '</details>', '',
+                     '> [!NOTE]- Note', '> Secret callout body', '', '```lua', 'print("Code body")', '```', '', 'AFTER'], conceallevel=3)
+        text = self.visible_text()
+        self.assertIn('Details title', text)
+        self.assertNotIn('Secret detail body', text)
+        self.assertNotIn('Secret callout body', text)
+        self.assertIn('Code body', text)
+        self.lua("vim.api.nvim_win_set_cursor(0,{3,0}); require('inkstone.api').toggle_fold(); vim.wait(100); vim.cmd('redraw!')")
+        self.pump()
+        self.assertIn('Secret detail body', self.visible_text())
+        self.lua("vim.api.nvim_win_set_cursor(0,{13,0}); require('inkstone.api').toggle_fold(); vim.wait(100); vim.cmd('redraw!')")
+        self.pump()
+        self.assertNotIn('Code body', self.visible_text())
         self.assert_source()
 
 

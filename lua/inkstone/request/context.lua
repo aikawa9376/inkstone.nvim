@@ -12,6 +12,7 @@ local str = require('inkstone.lib.str')
 ---@field inline render.md.request.Inline
 ---@field latex render.md.request.Latex
 ---@field used render.md.request.Used
+---@field media? table[]
 local Context = {}
 Context.__index = Context
 

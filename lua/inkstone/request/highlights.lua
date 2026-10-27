@@ -51,7 +51,7 @@ function Highlights:add(row, entry)
     if entry.conceal then
         if interval.valid(entry.conceal, true) then
             line.conceals[#line.conceals + 1] = entry.conceal
-            line.conceals = Highlights.coalesce_conceals(line.conceals)
+            line.conceals_dirty = true
         end
     end
     if entry.group then
@@ -92,6 +92,10 @@ function Highlights:line(row)
     local line = self.lines[row]
     if not line then
         line = { hidden = false, conceals = {}, groups = {} }
+    end
+    if line.conceals_dirty then
+        line.conceals = Highlights.coalesce_conceals(line.conceals)
+        line.conceals_dirty = nil
     end
     if line.groups_dirty then
         table.sort(line.groups, function(a, b)

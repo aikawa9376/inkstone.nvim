@@ -15,6 +15,7 @@ local M = {}
 
 ---called from plugin directory
 function M.init()
+    vim.keymap.set('n', '<Plug>(InkstoneToggleFold)', api.toggle_fold, { desc = 'Toggle Markdown fold' })
     vim.api.nvim_create_user_command(name, M.command, {
         nargs = '*',
         desc = plugin .. ' commands',

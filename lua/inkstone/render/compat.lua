@@ -2,6 +2,9 @@ local text = require('inkstone.text.compat')
 local M = {}
 
 local function covers(mark, row, first, last)
+    -- Replacements can be hidden when the cursor enters any source row. Keep
+    -- equal-width source corrections available for that restored source view.
+    if mark.replace then return false end
     local opts = mark.opts
     if not (mark.replace or opts.conceal_lines or opts.conceal
         or (opts.virt_text and opts.virt_text_pos == 'overlay')) then return false end

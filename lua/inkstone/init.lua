@@ -11,6 +11,8 @@ local M = {}
 ---@field debounce integer
 ---@field anti_conceal render.md.anti.conceal.Config
 ---@field display_compat render.md.display.compat.Config
+---@field folds render.md.folds.Config
+---@field media render.md.media.Config
 ---@field bullet render.md.bullet.Config
 ---@field callout render.md.callout.Configs
 ---@field checkbox render.md.checkbox.Config
@@ -96,6 +98,8 @@ M.default = {
     patterns = settings.patterns.default,
     anti_conceal = settings.anti_conceal.default,
     display_compat = settings.display_compat.default,
+    folds = settings.folds.default,
+    media = settings.media.default,
     padding = settings.padding.default,
     latex = settings.latex.default,
     on = settings.on.default,

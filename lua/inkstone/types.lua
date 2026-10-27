@@ -8,6 +8,8 @@
 ---@field debounce? integer
 ---@field anti_conceal? render.md.anti.conceal.UserConfig
 ---@field display_compat? { enabled?: boolean|'auto', kana?: boolean, replacements?: table<string, string> }
+---@field folds? render.md.folds.UserConfig
+---@field media? render.md.media.UserConfig
 ---@field bullet? render.md.bullet.UserConfig
 ---@field callout? render.md.callout.UserConfigs
 ---@field checkbox? render.md.checkbox.UserConfig
@@ -270,9 +272,28 @@
 ---@field highlight? string
 
 ---@class (exact) render.md.paragraph.UserConfig: render.md.base.UserConfig
+---@field wrap? boolean
+---@field japanese? { enabled?: boolean, budoux?: boolean }
 ---@field left_margin? render.md.paragraph.Number
 ---@field indent? render.md.paragraph.Number
 ---@field min_width? integer
+
+---@class (exact) render.md.folds.UserConfig: render.md.base.UserConfig
+---@field code? boolean
+---@field callout? boolean
+---@field details? boolean
+
+---@class (exact) render.md.media.UserConfig
+---@field enabled? boolean
+---@field images? boolean
+---@field mermaid? boolean
+---@field plantuml? boolean
+---@field max_width? integer
+---@field max_height? integer
+---@field timeout? integer
+---@field cache_dir? string
+---@field mermaid_command? string[]
+---@field plantuml_command? string[]
 
 ---@alias render.md.pattern.UserConfigs table<string, render.md.pattern.UserConfig>
 

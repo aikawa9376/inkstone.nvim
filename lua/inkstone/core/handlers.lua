@@ -55,6 +55,8 @@ function M.run(context, parser)
             })
         end
     end
+    marks = require('inkstone.core.folds').apply(context, parser, marks)
+    require('inkstone.core.media').collect(context, parser, marks)
     return require('inkstone.render.compat').apply(context, marks)
 end
 

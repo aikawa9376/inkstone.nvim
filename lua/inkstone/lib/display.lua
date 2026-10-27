@@ -7,7 +7,9 @@ local M = {}
 ---@return render.md.mark.Line
 function M.prefix(context, marks, node)
     local _, source = node:line('first', 0)
-    source = source and source:sub(1, node.start_col) or ''
+    -- Markdown row nodes may include their leading whitespace (ACP indents
+    -- every transcript line). Virtual rows must retain it just like overlays.
+    source = source and source:sub(1, node:col()) or ''
 
     local overlays = {} ---@type render.md.Mark[]
     for _, mark in ipairs(marks) do
@@ -56,13 +58,22 @@ function M.line(context, body)
 
     local inline = context.inline:get(body, true)
     local highlights = context.highlights:line(body.start_row)
+    local insertions, starts, ends = {}, {}, {}
 
     for _, value in ipairs(inline) do
         boundary(value.col)
+        insertions[value.col] = insertions[value.col] or {}
+        insertions[value.col][#insertions[value.col] + 1] = value.line
     end
-    for _, range in ipairs(highlights.groups) do
+    for index, range in ipairs(highlights.groups) do
         boundary(range[1])
         boundary(range[2])
+        local first, last = math.max(range[1], body.start_col), math.min(range[2], body.end_col)
+        if first < last then
+            starts[first], ends[last] = starts[first] or {}, ends[last] or {}
+            starts[first][#starts[first] + 1] = index
+            ends[last][#ends[last] + 1] = index
+        end
     end
     for _, range in ipairs(highlights.conceals) do
         boundary(range[1])
@@ -73,26 +84,31 @@ function M.line(context, body)
     table.sort(columns)
 
     local line = context.config:line()
+    local active, conceal_index = {}, 1
     for i = 1, #columns - 1 do
         local col, stop = columns[i], columns[i + 1]
-        for _, value in ipairs(inline) do
-            if value.col == col then
-                line:extend(value.line)
-            end
-        end
+        for _, index in ipairs(ends[col] or {}) do active[index] = nil end
+        for _, index in ipairs(starts[col] or {}) do active[index] = true end
+        for _, value in ipairs(insertions[col] or {}) do line:extend(value) end
         local groups = { context.config.padding.highlight } ---@type render.md.mark.Hl[]
-        for _, range in ipairs(highlights.groups) do
-            if col >= range[1] and col < range[2] then
-                local group = range.highlight
-                if type(group) == 'table' then
-                    vim.list_extend(groups, group)
-                else
-                    groups[#groups + 1] = group
-                end
+        -- Sweep interval endpoints instead of scanning every highlight and
+        -- inline insertion at every byte boundary of a long paragraph.
+        local indices = vim.tbl_keys(active)
+        table.sort(indices)
+        for _, index in ipairs(indices) do
+            local group = highlights.groups[index].highlight
+            if type(group) == 'table' then
+                vim.list_extend(groups, group)
+            else
+                groups[#groups + 1] = group
             end
         end
         local hidden = false
-        for _, range in ipairs(highlights.conceals) do
+        while highlights.conceals[conceal_index] and highlights.conceals[conceal_index][2] <= col do
+            conceal_index = conceal_index + 1
+        end
+        local range = highlights.conceals[conceal_index]
+        if range then
             if col >= range[1] and col < range[2] then
                 hidden = true
                 if col == math.max(range[1], body.start_col) then
@@ -101,7 +117,6 @@ function M.line(context, body)
                         groups
                     )
                 end
-                break
             end
         end
         if not hidden then
@@ -111,11 +126,7 @@ function M.line(context, body)
             )
         end
     end
-    for _, value in ipairs(inline) do
-        if value.col == body.end_col then
-            line:extend(value.line)
-        end
-    end
+    for _, value in ipairs(insertions[body.end_col] or {}) do line:extend(value) end
     return line:get()
 end
 

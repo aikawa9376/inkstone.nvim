@@ -1,6 +1,46 @@
 ---@class render.md.Settings
 local M = {}
 
+---@class render.md.folds.Config: render.md.base.Config
+---@field code boolean
+---@field callout boolean
+---@field details boolean
+M.folds = {
+    default = { enabled = true, render_modes = false, code = true, callout = true, details = true },
+    schema = function()
+        return M.base.schema({ code = { type = 'boolean' }, callout = { type = 'boolean' }, details = { type = 'boolean' } })
+    end,
+}
+
+---@class render.md.media.Config
+---@field enabled boolean
+---@field images boolean
+---@field mermaid boolean
+---@field plantuml boolean
+---@field max_width integer
+---@field max_height integer
+---@field timeout integer
+---@field cache_dir string
+---@field mermaid_command string[]
+---@field plantuml_command string[]
+M.media = {
+    default = {
+        enabled = true, images = true, mermaid = true, plantuml = true,
+        max_width = 80, max_height = 30, timeout = 15000,
+        cache_dir = vim.fn.stdpath('cache') .. '/inkstone/media',
+        mermaid_command = { 'mmdc' }, plantuml_command = { 'plantuml' },
+    },
+    schema = function()
+        return { record = {
+            enabled = { type = 'boolean' }, images = { type = 'boolean' },
+            mermaid = { type = 'boolean' }, plantuml = { type = 'boolean' },
+            max_width = { type = 'number' }, max_height = { type = 'number' }, timeout = { type = 'number' },
+            cache_dir = { type = 'string' },
+            mermaid_command = { list = { type = 'string' } }, plantuml_command = { list = { type = 'string' } },
+        } }
+    end,
+}
+
 ---@class (exact) render.md.display.compat.Config
 ---@field enabled boolean|'auto'
 ---@field kana boolean
@@ -1554,6 +1594,8 @@ end
 M.paragraph = {}
 
 ---@class (exact) render.md.paragraph.Config: render.md.base.Config
+---@field wrap boolean
+---@field japanese { enabled: boolean, budoux: boolean }
 ---@field left_margin render.md.paragraph.Number
 ---@field indent render.md.paragraph.Number
 ---@field min_width integer
@@ -1585,6 +1627,9 @@ M.paragraph.default = {
     indent = 0,
     -- Minimum width to use for paragraphs.
     min_width = 0,
+    -- Rebuild soft-wrapped paragraphs without changing source bytes.
+    wrap = true,
+    japanese = { enabled = true, budoux = true },
 }
 
 ---@return render.md.Schema
@@ -1593,6 +1638,11 @@ function M.paragraph.schema()
         left_margin = { union = { { type = 'number' }, { type = 'function' } } },
         indent = { union = { { type = 'number' }, { type = 'function' } } },
         min_width = { type = 'number' },
+        wrap = { type = 'boolean' },
+        japanese = { record = {
+            enabled = { type = 'boolean' },
+            budoux = { type = 'boolean' },
+        } },
     })
 end
 
