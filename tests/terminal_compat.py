@@ -348,6 +348,30 @@ class TerminalTests(unittest.TestCase):
         self.tmux('set-option', '-s', 'extended-keys', 'on')
         self.test_kitty_font_sizes_repaint_and_cursor_restore()
 
+    def test_fractional_text_chunks_do_not_add_gaps_inside_words(self):
+        self.tmux('set-option', '-g', 'allow-passthrough', 'on')
+        self.render(['BEFORE', '', '# Integer heading', '', '## Images and diagrams', '',
+                     '### Formatting and rendering', '', 'Normal <small>Images and diagrams</small> after', '', 'AFTER'])
+        self.lua("vim.env.KITTY_WINDOW_ID='1'; require('inkstone.api').render({buf=vim.api.nvim_get_current_buf()}); "
+                 "vim.wait(150); vim.cmd('redraw!')")
+        self.pump(.3)
+        rendered = []
+        for row in range(24):
+            leads = [(col, cell) for col, cell in enumerate(self.screen.cpu_cells(row))
+                     if cell.get('mcd') and cell['x'] == 0 and cell['y'] == 0]
+            if not leads:
+                continue
+            rendered.append(''.join(cell['text'] for _, cell in leads))
+            for (col, cell), (next_col, _) in zip(leads, leads[1:]):
+                meta = cell['mcd']
+                numerator, denominator = meta['subscale_n'] or 1, meta['subscale_d'] or 1
+                self.assertEqual((next_col - col) * denominator,
+                                 len(cell['text']) * meta['scale'] * numerator,
+                                 (row, col, cell))
+        self.assertEqual(rendered, ['Integer heading', 'Images and diagrams',
+                                    'Formatting and rendering', 'Images and diagrams'])
+        self.assert_source()
+
     def test_cursor_movement_keeps_typography_without_erase_frames(self):
         self.tmux('set-option', '-g', 'allow-passthrough', 'on')
         self.render(['BEFORE', '', '# Large heading', '', 'one', 'two', 'three', 'four', 'five', 'AFTER'])

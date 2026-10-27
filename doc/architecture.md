@@ -136,6 +136,12 @@ detection and repaint lifecycle. Headings reserve their scaled rows through
 normal extmarks; eligible `<small>` HTML spans retain source cell positions.
 Inline code containing those literal tags is not interpreted as markup.
 Payloads contain sanitized text and grapheme-safe chunks within OSC 66's bounds.
+Fractional runs use denominator-aligned chunk limits when representable within
+the protocol's seven-cell width bound. Arbitrary limits rounded each chunk up
+and inserted visible padding inside words, such as "Images an" / "d diagrams"
+at 1.5x. Full ASCII chunks now occupy their exact scaled advance; a final short
+chunk may retain trailing padding. Highlight boundaries and indivisible wide
+graphemes still obey the protocol's integer cell constraints.
 Kitty 0.40+ is required: under tmux, read its cached `client_termtype` alongside
 pane geometry over the tmux socket; do not send XTVERSION through passthrough.
 tmux consumes its first terminal-identity reply, then may translate later ones

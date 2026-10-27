@@ -200,6 +200,8 @@ the smaller size. Nested/indented headings and spans already replaced by table
 or paragraph layouts retain their existing rendering. Set `paragraph.wrap = false`
 when using small spans in long paragraphs. Unrepresentable narrow placements
 fall back to normal text. Fractional sizes use the protocol's rational bounds.
+Full text chunks align to those fractions so their rounded widths do not add
+gaps in ordinary words; a final short chunk can retain trailing padding.
 
 Stock tmux works with `set -g allow-passthrough on`. Inkstone reads the pane
 offset and top status-bar height and uses standard passthrough; it does not

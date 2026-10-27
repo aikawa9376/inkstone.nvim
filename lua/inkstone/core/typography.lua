@@ -156,6 +156,11 @@ function M.runs(chunks, spec)
     local units = require('inkstone.parser.table').units(chunks)
     local result, text, width, highlight = {}, {}, 0, nil
     local limit = math.max(1, math.floor(7 * spec.den / spec.num))
+    -- OSC 66 advances by whole scaled cells. A full fractional run must end
+    -- on an exact denominator boundary; otherwise each chunk's rounded tail
+    -- adds a gap in words (e.g. "Images an" + "d diagrams" at 1.5x).
+    local exact = math.floor(limit / spec.den) * spec.den
+    if exact > 0 then limit = exact end
     local function flush()
         if width == 0 then return end
         local cells = math.max(1, math.ceil(width * spec.num / spec.den - 1e-8))

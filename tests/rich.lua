@@ -263,6 +263,22 @@ return function(test, equal, buffer)
         vim.api.nvim_buf_delete(buf, { force = true })
     end)
 
+    test('fractional typography does not round space into the middle of words', function()
+        local typography = require('inkstone.core.typography')
+        local text = 'Images and diagrams and formatting'
+        for _, ratio in ipairs({ .8, 1.25, 1.5, 2 }) do
+            local spec = assert(typography.spec(ratio))
+            local runs = typography.runs({ { text, 'Normal' } }, spec)
+            local joined = {}
+            for i, run in ipairs(runs) do
+                joined[#joined + 1] = run.text
+                assert(run.cells <= 7)
+                if i < #runs then equal(run.width, vim.fn.strdisplaywidth(run.text) * spec.ratio) end
+            end
+            equal(table.concat(joined), text)
+        end
+    end)
+
     test('terminal probe guards fragmented replies and drains after disable or retry', function()
         local typography = require('inkstone.core.typography')
         local tmux = vim.env.TMUX; vim.env.TMUX = nil
