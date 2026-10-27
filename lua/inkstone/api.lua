@@ -97,6 +97,11 @@ function M.typography()
     require('inkstone.core.ui').update(buf, win, 'TypographyToggle', true)
 end
 
+function M.refresh()
+    M.render({ buf = vim.api.nvim_get_current_buf(), event = 'Refresh' })
+    require('inkstone.core.typography').schedule(true)
+end
+
 function M.media()
     require('inkstone.core.media').open()
 end

@@ -168,8 +168,11 @@ lines when their origin and width are unchanged. Floats and popup menus erase
 only intersecting lines before they draw, never the rest of the page. Decoration
 callbacks alone do not prove damage: post-flush snapshots of native cells and
 attributes suppress replays when a window-wide option redraw leaves the actual
-placement unchanged. Snapshot reads are limited to flagged/new visible rectangles;
-routine foreign-repaint recovery reuses their snapshots.
+placement unchanged. Snapshot reads are limited to flagged/new visible rectangles.
+Idle typography does not replay unchanged text by default, including fractional
+H2/H3 sizes. Periodic replays are observable output even without explicit erases;
+final multicell metadata alone does not establish that intermediate GPU frames
+are stable.
 
 With updated auto-cursorline.nvim, `sync_cursorline` temporarily owns
 `w:auto_cursorline_disabled` while the cursor is on a shown typography range.
@@ -180,11 +183,15 @@ active highlights and queued enable timers honor suppression. Source restored
 by anti-conceal retains normal cursorline behavior. No plugin is loaded just
 for this integration and no global cursorline setting is changed.
 
-A scoped 250ms timer recovers foreign repaint damage by reissuing identical
-multicells without a preceding glyph erase. Ordinary dirty-line replays use
-the same approach; only obsolete extents and trailing unscaled fallback cells
-need explicit clearing. This avoids blank intermediate rows during command-line
-typing, floating terminal updates and recovery. Size-only changes still clear
+Native dirty-line replays reissue multicells without a preceding glyph erase;
+only obsolete extents and trailing unscaled fallback cells need explicit clearing.
+An external tmux refresh can overwrite passthrough text without a Neovim event.
+`:Inkstone refresh` explicitly rebuilds the current view and forces overlay replay.
+`typography.recovery=true` opts a buffer into the former 250ms foreign-repaint
+recovery loop. Its unchanged replays use cached snapshots and target only opted-in
+buffers. The timer runs only while at least one such buffer is visible, and
+stops when the last one is hidden/cleared. It is off by default to avoid periodic
+output and fractional-text flicker. Size-only changes still clear
 the previous extent even when grid extmarks were reused. Float/popup bounds and active tabs are checked
 before drawing; cursor source restoration follows anti-conceal. Terminal geometry
 refreshes retain request waiters until the fallback frame is rebuilt. Setup,

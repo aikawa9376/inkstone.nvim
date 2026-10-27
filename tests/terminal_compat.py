@@ -299,7 +299,7 @@ class TerminalTests(unittest.TestCase):
         self.tmux('set-option', '-g', 'allow-passthrough', 'on')
         self.render(['BEFORE', '', '# Large 日本語', '', 'Normal <small>Small</small> after', '', 'AFTER'])
         self.lua("vim.env.KITTY_WINDOW_ID='1'; local c=require('inkstone.state').get(vim.api.nvim_get_current_buf()); "
-                 "c.typography.enabled=true; require('inkstone.api').render({buf=vim.api.nvim_get_current_buf()}); "
+                 "c.typography.enabled=true; c.typography.recovery=true; require('inkstone.api').render({buf=vim.api.nvim_get_current_buf()}); "
                  "vim.wait(300); vim.cmd('redraw!')")
         self.pump(.4)
 
@@ -493,25 +493,26 @@ class TerminalTests(unittest.TestCase):
         if not (plugin / 'lua/auto_cursorline/init.lua').is_file():
             self.skipTest('auto-cursorline.nvim is not installed')
         self.tmux('set-option', '-g', 'allow-passthrough', 'on')
-        self.render(['BEFORE', '', '# FIRST', '', '# SECOND', '', 'BODY', 'OTHER BODY', '', 'AFTER'])
+        self.render(['BEFORE', '', '# FIRST', '', '## SECOND', '', '### THIRD', '', 'BODY', 'OTHER BODY', '', 'AFTER'])
         self.lua("vim.env.KITTY_WINDOW_ID='1'; vim.api.nvim_set_hl(0,'CursorLine',{bg=0x334455}); "
                  "require('inkstone.api').render({buf=vim.api.nvim_get_current_buf()}); vim.wait(150); "
-                 "vim.api.nvim_win_set_cursor(0,{7,0}); vim.wo.cursorline=false; vim.cmd('redraw!')")
+                 "vim.api.nvim_win_set_cursor(0,{9,0}); vim.wo.cursorline=false; vim.cmd('redraw!')")
         self.pump(.3)
         self.lua('vim.opt.rtp:prepend(' + json.dumps(str(plugin)) + '); '
                  "require('auto_cursorline').setup({wait_ms=60}); "
-                 "require('inkstone.core.typography').timer:stop(); _G.typography_replays=0; "
+                 "_G.typography_replays=0; "
                  "local send=vim.api.nvim_ui_send; vim.api.nvim_ui_send=function(s) "
-                 "if s:find('FIRST',1,true) or s:find('SECOND',1,true) then _G.typography_replays=_G.typography_replays+1 end; return send(s) end")
-        for row in (8, 7, 3, 5, 8):
+                 "if s:find('FIRST',1,true) or s:find('SECOND',1,true) or s:find('THIRD',1,true) then _G.typography_replays=_G.typography_replays+1 end; return send(s) end")
+        for row in (10, 9, 3, 5, 7, 9):
             self.lua('vim.api.nvim_win_set_cursor(0,{' + str(row) + ',0}); require("auto_cursorline").cursor_moved()')
             self.pump(.15)
-            self.assertEqual(self.lua('print(vim.wo.cursorline)'), 'false' if row in (3, 5) else 'true')
+            self.assertEqual(self.lua('print(vim.wo.cursorline)'), 'false' if row in (3, 5, 7) else 'true')
             self.assertEqual(int(self.lua('print(_G.typography_replays)')), 0)
             text = [cell['text'] for line in range(24) for cell in self.screen.cpu_cells(line)
                     if cell.get('mcd') and cell['x'] == 0 and cell['y'] == 0]
             self.assertIn('FIRST', text)
             self.assertIn('SECOND', text)
+            self.assertIn('THIRD', text)
         self.lua('vim.api.nvim_win_set_cursor(0,{3,0}); require("auto_cursorline").cursor_moved()')
         self.pump(.15)
         self.assertEqual(self.lua('print(vim.wo.cursorline)'), 'false')
@@ -519,6 +520,56 @@ class TerminalTests(unittest.TestCase):
         self.pump(.15)
         self.assertEqual(self.lua('print(vim.w.auto_cursorline_disabled)'), 'nil')
         self.assertEqual(self.lua('print(vim.wo.cursorline)'), 'true')
+        self.assert_source()
+
+    def test_fractional_typography_is_idle_until_damage_or_explicit_refresh(self):
+        self.tmux('set-option', '-g', 'allow-passthrough', 'on')
+        self.render(['BEFORE', '', '# FIRST', '', '## SECOND', '', '### THIRD', '', 'BODY'])
+        self.lua("vim.env.KITTY_WINDOW_ID='1'; require('inkstone.api').render({buf=vim.api.nvim_get_current_buf()}); vim.wait(200)")
+        self.pump(.3)
+        self.lua("_G.font_packets={}; local send=vim.api.nvim_ui_send; vim.api.nvim_ui_send=function(s) "
+                 "if s:find(']66;',1,true) then _G.font_packets[#_G.font_packets+1]=s end; return send(s) end")
+        self.pump(.8)
+        self.assertEqual(self.lua('print(#_G.font_packets)'), '0')
+        self.assertEqual(self.lua("print(require('inkstone.core.typography').timer:is_active())"), 'false')
+        self.lua("vim.api.nvim_buf_set_extmark(0,vim.api.nvim_create_namespace('FractionalDamage'),4,0,"
+                 "{virt_text={{'!','ErrorMsg'}},virt_text_win_col=0,priority=10000}); vim.cmd('redraw!')")
+        self.pump(.15)
+        packets = self.lua('print(table.concat(_G.font_packets))')
+        self.assertIn('SECOND', packets)
+        self.assertNotIn('FIRST', packets)
+        self.assertNotIn('THIRD', packets)
+        self.tmux('refresh-client')
+        self.pump(.15)
+        self.lua("require('inkstone.api').refresh(); vim.wait(150)")
+        self.pump(.2)
+        text = [cell['text'] for line in range(24) for cell in self.screen.cpu_cells(line)
+                if cell.get('mcd') and cell['x'] == 0 and cell['y'] == 0]
+        for heading in ('FIRST', 'SECOND', 'THIRD'):
+            self.assertIn(heading, text)
+        self.assert_source()
+
+    def test_periodic_typography_recovery_only_replays_opted_in_buffers(self):
+        self.tmux('set-option', '-g', 'allow-passthrough', 'on')
+        self.render(['BEFORE', '', '## FIRST', '', 'BODY'])
+        self.lua("vim.env.KITTY_WINDOW_ID='1'; _G.first_win=vim.api.nvim_get_current_win(); "
+                 "require('inkstone.api').render({buf=vim.api.nvim_get_current_buf()}); vim.wait(150); "
+                 "vim.cmd('vnew'); vim.api.nvim_buf_set_lines(0,0,-1,false,{'BEFORE','','## SECOND','','BODY'}); "
+                 "vim.bo.filetype='markdown'; vim.treesitter.start(0,'markdown'); "
+                 "require('inkstone.api').render({buf=vim.api.nvim_get_current_buf(),config={typography={recovery=true}}}); vim.wait(200)")
+        self.pump(.3)
+        self.lua("_G.font_packets={}; local send=vim.api.nvim_ui_send; vim.api.nvim_ui_send=function(s) "
+                 "if s:find(']66;',1,true) then _G.font_packets[#_G.font_packets+1]=s end; return send(s) end")
+        self.pump(.6)
+        packets = self.lua('print(table.concat(_G.font_packets))')
+        self.assertIn('SECOND', packets)
+        self.assertNotIn('FIRST', packets)
+        self.lua("local opted=vim.api.nvim_get_current_win(); vim.api.nvim_set_current_win(_G.first_win); vim.api.nvim_win_close(opted,true); vim.wait(150)")
+        self.pump(.2)
+        self.lua('_G.font_packets={}')
+        self.pump(.6)
+        self.assertEqual(self.lua('print(#_G.font_packets)'), '0')
+        self.assertEqual(self.lua("print(require('inkstone.core.typography').timer:is_active())"), 'false')
         self.assert_source()
 
     def test_fragmented_version_reply_never_becomes_mapped_input(self):

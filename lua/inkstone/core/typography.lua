@@ -425,7 +425,8 @@ function M.paint(force)
         local changed = not old or old.payload ~= rect.payload or old.width ~= rect.width
         local revisit = changed or (M.damaged and M.damaged[rect.key])
         rect.native = revisit and native_cells(rect) or old.native
-        if force or changed or (revisit and not vim.deep_equal(old.native, rect.native)) then
+        local recover = force == 'recovery' and M.active[rect.buf].recovery
+        if force == true or recover or changed or (revisit and not vim.deep_equal(old.native, rect.native)) then
             out[#out + 1] = rect.payload
         end
     end
@@ -436,7 +437,7 @@ function M.paint(force)
 end
 
 function M.schedule(force)
-    M.force = M.force or force
+    if force == true or not M.force then M.force = force end
     if M.pending or not next(M.active) then return end
     M.pending = true
     vim.schedule(function()
@@ -444,6 +445,24 @@ function M.schedule(force)
         M.pending, M.force = false, nil
         M.paint(repaint)
     end)
+end
+
+-- Avoid continually rewriting unchanged fractional multicells while idle.
+-- Native damage is event-driven; periodic foreign-redraw recovery
+-- is opt-in and must never repaint windows that did not request it.
+local function sync_recovery()
+    if not M.timer then return end
+    for buf, state in pairs(M.active) do
+        if state.recovery and vim.api.nvim_win_is_valid(state.win)
+            and vim.api.nvim_win_get_buf(state.win) == buf
+            and vim.api.nvim_win_get_tabpage(state.win) == vim.api.nvim_get_current_tabpage() then
+            if not M.timer:is_active() then
+                M.timer:start(250, 250, vim.schedule_wrap(function() M.schedule('recovery') end))
+            end
+            return
+        end
+    end
+    M.timer:stop()
 end
 
 -- auto-cursorline can avoid writing a transient background over a multicell
@@ -521,7 +540,6 @@ local function start()
         on_end = function() M.schedule() end,
     })
     M.timer = vim.uv.new_timer()
-    M.timer:start(250, 250, vim.schedule_wrap(function() M.schedule(true) end))
 end
 
 function M.clear(buf, keep_waiter)
@@ -537,7 +555,7 @@ function M.clear(buf, keep_waiter)
     if not next(M.active) then
         if M.timer then M.timer:stop(); M.timer:close(); M.timer = nil end
         vim.api.nvim_set_decoration_provider(ns, {})
-    else M.schedule() end
+    else sync_recovery(); M.schedule() end
     if painted then vim.schedule(function() if vim.v.dying == 0 then vim.cmd('redraw!') end end) end
 end
 
@@ -558,14 +576,19 @@ function M.update(context, extmarks)
         M.erase(function(rect) return rect.buf == context.buf end)
     end
     M.active[context.buf] = { win = context.win, tick = tick, entries = entries,
+        recovery = context.config.typography.recovery,
         geometry = previous and previous.win == context.win and previous.geometry or nil }
     M.sync_cursorline()
     start()
+    sync_recovery()
     M.schedule()
 end
 
 local group = vim.api.nvim_create_augroup('InkstoneTypography', { clear = true })
-vim.api.nvim_create_autocmd({ 'CursorMoved', 'CursorMovedI', 'BufEnter', 'WinEnter', 'WinClosed' }, { group = group, callback = M.sync_cursorline })
+vim.api.nvim_create_autocmd({ 'CursorMoved', 'CursorMovedI', 'BufEnter', 'WinEnter', 'WinClosed' }, { group = group, callback = function()
+    M.sync_cursorline()
+    sync_recovery()
+end })
 vim.api.nvim_create_autocmd({ 'VimResized', 'FocusGained' }, { group = group, callback = function()
     if not next(M.active) and not M.probing and not next(M.waiters or {}) then return end
     M.erase(); M.tmux = nil

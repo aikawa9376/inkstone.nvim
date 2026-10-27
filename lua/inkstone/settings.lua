@@ -5,11 +5,12 @@ local M = {}
 ---@field enabled boolean|'auto'
 ---@field headings number[]
 ---@field small number
+---@field recovery boolean
 M.typography = {
-    default = { enabled = 'auto', headings = { 2, 1.5, 1.25, 1, 1, 1 }, small = .8 },
+    default = { enabled = 'auto', headings = { 2, 1.5, 1.25, 1, 1, 1 }, small = .8, recovery = false },
     schema = function()
         return { record = { enabled = { union = { { type = 'boolean' }, { enum = { 'auto' } } } },
-            headings = { list = { type = 'number' } }, small = { type = 'number' } } }
+            headings = { list = { type = 'number' } }, small = { type = 'number' }, recovery = { type = 'boolean' } } }
     end,
 }
 
