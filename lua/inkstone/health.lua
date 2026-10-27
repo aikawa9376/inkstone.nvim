@@ -42,7 +42,12 @@ function M.check()
         M.ts_info('html', false, false)
     end
     if latex.enabled then
-        M.ts_info('latex', false, false)
+        local ok, info = pcall(vim.treesitter.language.inspect, 'latex')
+        if ok and info then M.ts_info('latex', false, false)
+        else
+            M.start('tree-sitter latex (optional)')
+            vim.health.info('Using Markdown formula ranges; the LaTeX parser is optional for Unicode conversion')
+        end
     end
     if yaml.enabled then
         M.ts_info('yaml', false, false)
@@ -97,6 +102,8 @@ function M.check()
     if config.typography.enabled == false then vim.health.ok('disabled')
     elseif not vim.api.nvim_ui_send then vim.health.warn('OSC 66 needs Neovim 0.12+; normal text is retained')
     elseif typography.capability == true then vim.health.ok('Kitty 0.40+ text sizing detected')
+    elseif vim.env.TMUX then
+        vim.health.info('Kitty 0.40+ not found in tmux client_termtype; normal text is the fallback')
     else vim.health.info('Waiting for a Kitty 0.40+ XTVERSION reply; normal text is the fallback') end
     if vim.env.TMUX and typography.tmux and not typography.tmux.allowed then
         vim.health.warn('tmux passthrough is disabled; enable allow-passthrough on to use typography')

@@ -44,6 +44,22 @@ function M.run(context, parser)
         end
     end)
 
+    -- Unicode conversion only needs source ranges, not a LaTeX syntax tree.
+    -- Markdown already identifies formulas; retain conversion when the optional
+    -- LaTeX parser/injection is missing. Never duplicate actual injected roots
+    -- or pass Markdown nodes to a user-supplied LaTeX handler.
+    if context.config.latex.enabled and not language_roots.latex and not state.custom_handlers.latex
+        and #require('inkstone.lib.env').commands(context.config.latex.converter) > 0 then
+        local query = require('inkstone.core.ts').parse('markdown_inline', '(latex_block) @latex')
+        local formulas = {}
+        for _, root in ipairs(language_roots.markdown_inline or {}) do
+            for _, node in query:iter_captures(root, context.buf) do
+                if context.view:overlaps(node) then formulas[#formulas + 1] = node end
+            end
+        end
+        if #formulas > 0 then language_roots.latex = formulas end
+    end
+
     -- languages that run later will have more complete state
     local languages = vim.tbl_keys(language_roots) ---@type string[]
     local order = { latex = 10, markdown = 100 } ---@type table<string, integer>

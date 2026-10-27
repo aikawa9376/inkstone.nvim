@@ -134,9 +134,14 @@ detection and repaint lifecycle. Headings reserve their scaled rows through
 normal extmarks; eligible `<small>` HTML spans retain source cell positions.
 Inline code containing those literal tags is not interpreted as markup.
 Payloads contain sanitized text and grapheme-safe chunks within OSC 66's bounds.
-Only a positive Kitty 0.40+ XTVERSION response enables output. Neovim 0.12's
+Kitty 0.40+ is required: under tmux, read its cached `client_termtype` alongside
+pane geometry over the tmux socket; do not send XTVERSION through passthrough.
+tmux consumes its first terminal-identity reply, then may translate later ones
+into ordinary/extended keys before Neovim receives them. A Neovim key timeout
+guard cannot protect this path. Missing/old cached identities use normal text.
+Outside tmux, require a positive Kitty XTVERSION response. Neovim 0.12's
 `nvim_ui_send` is required; unsupported/headless cases retain normal rendering.
-The XTVERSION probe temporarily holds `ttimeout=true` and `ttimeoutlen>=1200`
+The direct-terminal XTVERSION probe temporarily holds `ttimeout=true` and `ttimeoutlen>=1200`
 until its reply or 1.2-second timeout. Without this guard, split DCS input can
 expire into ordinary mapped keys and modify the source when users configure
 very short key-code timeouts. It restores only options still matching its
@@ -159,6 +164,20 @@ The source bytes and normal grid remain authoritative. This is a scoped
 terminal overlay, not a replacement Neovim TUI, and brief fallback/flicker during
 unrelated redraws is possible. `doc/rendering-features.md` owns configuration,
 eligibility and user-facing limits; `demo/rich.md` is the interactive sample.
+
+## LaTeX source ranges and converters
+
+The built-in LaTeX handler converts formula source to Unicode using `utftex`
+or `latex2text`; its layout consumes source ranges, not the LaTeX AST structure.
+`core/handlers.lua` prefers injected LaTeX roots, then collects `latex_block`
+nodes from existing Markdown-inline trees only when no LaTeX roots exist and a
+converter is available. This keeps math working without the optional LaTeX
+parser/injection, excludes literal code, preserves nested/viewport filtering,
+and avoids duplicate formulas. Custom LaTeX handlers retain their original AST
+contract and do not receive Markdown nodes through this fallback.
+`tests/rich.lua` checks real `latex2text` conversion with LaTeX trees filtered
+out, including inline/block output and source preservation. The converter
+determines flat versus multiline appearance; this path does not typeset images.
 
 ## Next work
 

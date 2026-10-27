@@ -47,7 +47,8 @@ class TerminalTests(unittest.TestCase):
         self.pid = pid
         self.addCleanup(self.close_terminal)
         self.pump(0.15)
-        os.write(self.fd, b'\x1bP>|kitty(0.49.2)\x1b\\')
+        identity = b'kitty(0.39.0)' if self._testMethodName == 'test_old_kitty_keeps_native_text' else b'kitty(0.49.2)'
+        os.write(self.fd, b'\x1bP>|' + identity + b'\x1b\\')
         self.pump(0.15)
 
     def close_terminal(self):
@@ -328,6 +329,7 @@ class TerminalTests(unittest.TestCase):
         self.lua("vim.env.KITTY_WINDOW_ID=nil; vim.env.TERM_PROGRAM=nil")
         self.render(['BEFORE', '', '# Large heading', '', 'BODY', '', 'AFTER'])
         self.fragment_response = True
+        query_start = len(self.output)
         self.lua("vim.o.ttimeout=true; vim.o.ttimeoutlen=1; _G.version_puts=0; "
                  "vim.keymap.set('n','P',function() _G.version_puts=_G.version_puts+1 end); "
                  "vim.env.KITTY_WINDOW_ID='1'; require('inkstone.api').render({buf=vim.api.nvim_get_current_buf()})")
@@ -341,6 +343,21 @@ class TerminalTests(unittest.TestCase):
             self.assertEqual(state, ['n', 0, 1])
             self.assertTrue(any((cell.get('mcd') or {}).get('scale') == 2
                                 for row in range(24) for cell in self.screen.cpu_cells(row)), self.visible_text())
+            self.assertNotIn(b'\x1b[>0q', self.output[query_start:])
+
+    def test_tmux_csi_u_version_probe_does_not_trigger_mappings(self):
+        self.tmux('set-option', '-s', 'extended-keys', 'always')
+        self.tmux('set-option', '-s', 'extended-keys-format', 'csi-u')
+        self.test_fragmented_version_reply_never_becomes_mapped_input()
+
+    def test_latex2text_demo_without_latex_parser(self):
+        if not Path('/usr/bin/latex2text').is_file():
+            self.skipTest('latex2text is not installed')
+        self.render(Path(ROOT / 'demo/latex.md').read_text().splitlines())
+        text = self.visible_text()
+        self.assertIn('√(3x-1)+(1+x)^2', text)
+        self.assertIn('lim_n→∞ (1 + 1/n)^n', text)
+        self.assert_source()
 
     def test_kitty_graphics_chart_and_viewer(self):
         snacks = Path(os.environ.get('INKSTONE_SNACKS_RTP', Path.home() / '.local/share/nvim/lazy/snacks.nvim'))

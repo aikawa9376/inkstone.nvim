@@ -28,6 +28,18 @@ end
 
 function M.probe()
     if M.probing or M.capability ~= nil then return end
+    if vim.env.TMUX then
+        -- tmux consumes its first XTVERSION reply, but can translate later
+        -- replies into extended keys before Neovim sees them. A TUI timeout
+        -- guard cannot undo that. Read tmux's cached identity over its socket.
+        if not M.tmux then
+            M.refresh_tmux(function() if M.tmux.allowed then M.probe() end end)
+        else
+            M.capability = M.version_supported(M.tmux.terminal)
+            refresh_waiters()
+        end
+        return
+    end
     M.probing = true
     -- A fragmented DCS reply becomes mapped keys if the TUI's key-code timer
     -- expires (notably with ttimeoutlen=1). Protect only the query's lifetime.
@@ -58,6 +70,11 @@ function M.probe()
     send('\27[>0q')
 end
 
+function M.version_supported(identity)
+    local major, minor = (identity or ''):match('^kitty%((%d+)%.(%d+)')
+    return major ~= nil and (tonumber(major) > 0 or tonumber(minor) >= 40)
+end
+
 function M.retry()
     if M.capability == true and M.tmux and M.tmux.allowed then return end
     -- Reuse an in-flight query: its reply cannot be recalled or safely ignored.
@@ -84,15 +101,22 @@ function M.refresh_tmux(callback)
     M.querying = true
     local args = { 'tmux', 'display-message', '-p' }
     if vim.env.TMUX_PANE then vim.list_extend(args, { '-t', vim.env.TMUX_PANE }) end
-    args[#args + 1] = '#{pane_top},#{pane_left},#{allow-passthrough},#{status},#{status-position}'
+    args[#args + 1] = '#{pane_top},#{pane_left},#{allow-passthrough},#{status},#{status-position},#{client_termtype}'
     vim.system(args, { text = true, timeout = 1000 }, function(result)
         vim.schedule(function()
             M.querying = false
-            local top, left, allowed, status, position = (result.stdout or ''):match('(%d+),(%d+),([^,]*),([^,]*),([^%s]*)')
+            local top, left, allowed, status, position, terminal = (result.stdout or ''):match(
+                '^(%d+),(%d+),([^,]*),([^,]*),([^,]*),([^\r\n]*)')
             M.tmux = { top = tonumber(top) or 0, left = tonumber(left) or 0,
-                allowed = result.code == 0 and (allowed == 'on' or allowed == 'all') }
+                allowed = result.code == 0 and (allowed == 'on' or allowed == 'all'), terminal = terminal }
             if position == 'top' and status ~= 'off' then M.tmux.top = M.tmux.top + (tonumber(status) or 1) end
-            if M.capability == true then refresh_waiters() end
+            local previous = M.capability
+            M.capability = M.version_supported(terminal)
+            if previous ~= M.capability then
+                M.waiters = M.waiters or {}
+                for buf, active in pairs(M.active) do M.waiters[buf] = active.win end
+            end
+            refresh_waiters()
             if callback then callback() end
         end)
     end)

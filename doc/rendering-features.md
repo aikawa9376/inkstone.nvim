@@ -30,6 +30,25 @@ containing image anchors or externally converted math retain source-row layout
 so their image/math placements remain anchored correctly. Very narrow windows
 fall back to source display. This is not full JIS X 4051 conformance.
 
+## LaTeX formulas
+
+`latex.enabled = true` converts `$...$` and `$$...$$` through the first available
+command in `latex.converter = { 'utftex', 'latex2text' }`. Install a converter
+yourself; on Arch Linux, `python-pylatexenc` provides `latex2text`. Markdown's
+formula nodes supply source ranges when a separate LaTeX parser/injection is
+unavailable. Code spans and fenced code remain literal. Injected LaTeX trees
+continue to take precedence, so formulas are never rendered twice.
+
+The converter determines the appearance: `latex2text` 2.x produces mostly flat
+Unicode text such as `√(3x-1)+(1+x)^2` and `lim_n→∞ (1 + 1/n)^n`; it does not
+typeset stacked fractions like a TeX image. `utftex` supports multiline Unicode
+math layouts. The current math path displays converter text, not Kitty images.
+At the default `latex.position = 'center'`, inline formulas replace their source
+while multiline formulas appear above their original block.
+
+Try `nvim --clean -u demo/rich_init.lua demo/latex.md` without downloading demo
+dependencies. `:checkhealth inkstone` reports available converters.
+
 ## Images and diagrams
 
 The optional graphics backend is `folke/snacks.nvim`. Its terminal support and
@@ -133,9 +152,13 @@ can invalidate a selected table when the whole anchored range is removed.
 Kitty 0.40+ and Neovim 0.12+ can display genuinely larger/smaller text using
 [OSC 66](https://sw.kovidgoyal.net/kitty/text-sizing-protocol/). This changes
 the displayed text size, with original Markdown retained for editing/yank/save.
-Support requires a positive Kitty XTVERSION reply; other terminals and headless
-sessions keep normal text and do not reserve extra rows.
-While awaiting that reply (up to 1.2 seconds), Inkstone temporarily enables
+Under tmux, support is detected from its cached `client_termtype` over the tmux
+socket. Inkstone never sends a terminal identity query through tmux: a repeated
+XTVERSION reply can be translated into keys before Neovim sees it. Unknown or
+old terminal identities keep normal text; tmux options and key timeouts are
+unchanged. Outside tmux, support requires a positive Kitty XTVERSION reply;
+other terminals and headless sessions keep normal text and reserve no extra rows.
+While awaiting a direct-terminal reply (up to 1.2 seconds), Inkstone temporarily enables
 `ttimeout` and raises `ttimeoutlen` to at least 1200ms so fragmented terminal
 responses cannot be mistaken for mapped keys with settings such as
 `ttimeoutlen=1`. It restores the previous values after the reply or timeout,

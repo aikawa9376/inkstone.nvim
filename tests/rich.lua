@@ -116,6 +116,34 @@ return function(test, equal, buffer)
         vim.fn.delete(dir, 'rf')
     end)
 
+    external_test('LaTeX converts through latex2text without an injected LaTeX parser', { 'latex2text' }, function()
+        local original = { 'BEFORE', '', '$\\sqrt{3x-1}+(1+x)^2$', '', '$$',
+            '\\lim_{n\\to\\infty} \\left(1 + \\frac{1}{n}\\right)^n', '$$', '',
+            '`$\\sqrt{literal}$`', '', 'AFTER' }
+        local buf, render, parser = setup(original, { latex = { converter = 'latex2text' } })
+        local each_tree = parser.for_each_tree
+        parser.for_each_tree = function(self, callback)
+            each_tree(self, function(tree, language)
+                if language:lang() ~= 'latex' then callback(tree, language) end
+            end)
+        end
+        local marks, ctx = render()
+        equal(#ctx.latex:get(), 2)
+        local text = {}
+        for _, mark in ipairs(marks) do
+            for _, chunk in ipairs(mark.opts.virt_text or {}) do text[#text + 1] = chunk[1] end
+            for _, line in ipairs(mark.opts.virt_lines or {}) do
+                for _, chunk in ipairs(line) do text[#text + 1] = chunk[1] end
+            end
+        end
+        local output = table.concat(text, '\n')
+        assert(output:find('√(3x-1)+(1+x)^2', 1, true), output)
+        assert(output:find('lim_n→∞ (1 + 1/n)^n', 1, true), output)
+        equal(vim.api.nvim_buf_get_lines(buf, 0, -1, false), original)
+        parser.for_each_tree = each_tree
+        vim.api.nvim_buf_delete(buf, { force = true })
+    end)
+
     test('PDF links are collected for explicit viewing without inline duplication', function()
         local buf, render = setup({ 'BEFORE', '', '[Paper](assets/paper.pdf#page=3)', '', 'AFTER' }, { media = { enabled = true } })
         local _, ctx = render()
@@ -198,6 +226,7 @@ return function(test, equal, buffer)
 
     test('terminal probe guards fragmented replies and drains after disable or retry', function()
         local typography = require('inkstone.core.typography')
+        local tmux = vim.env.TMUX; vim.env.TMUX = nil
         local send, capability = vim.api.nvim_ui_send, typography.capability
         local timeout, length = vim.o.ttimeout, vim.o.ttimeoutlen
         local queries = 0
@@ -218,10 +247,12 @@ return function(test, equal, buffer)
         equal(typography.probe_autocmd, nil)
         vim.api.nvim_ui_send, typography.capability = send, capability
         vim.o.ttimeout, vim.o.ttimeoutlen = timeout, length
+        vim.env.TMUX = tmux
     end)
 
     test('terminal probe preserves option changes made while waiting', function()
         local typography = require('inkstone.core.typography')
+        local tmux = vim.env.TMUX; vim.env.TMUX = nil
         local send, capability = vim.api.nvim_ui_send, typography.capability
         local timeout, length = vim.o.ttimeout, vim.o.ttimeoutlen
         vim.api.nvim_ui_send = function() end
@@ -235,10 +266,12 @@ return function(test, equal, buffer)
         equal({ vim.o.ttimeout, vim.o.ttimeoutlen }, { false, 2500 })
         vim.api.nvim_ui_send, typography.capability = send, capability
         vim.o.ttimeout, vim.o.ttimeoutlen = timeout, length
+        vim.env.TMUX = tmux
     end)
 
     test('unanswered terminal probes release their input guard on timeout', function()
         local typography = require('inkstone.core.typography')
+        local tmux = vim.env.TMUX; vim.env.TMUX = nil
         local send, capability = vim.api.nvim_ui_send, typography.capability
         local timeout, length = vim.o.ttimeout, vim.o.ttimeoutlen
         vim.api.nvim_ui_send = function() end
@@ -252,6 +285,24 @@ return function(test, equal, buffer)
         equal(typography.probe_autocmd, nil)
         vim.api.nvim_ui_send, typography.capability = send, capability
         vim.o.ttimeout, vim.o.ttimeoutlen = timeout, length
+        vim.env.TMUX = tmux
+    end)
+
+    test('tmux uses cached terminal identity without sending input-stream queries', function()
+        local typography = require('inkstone.core.typography')
+        local tmux, cached, capability, send = vim.env.TMUX, typography.tmux, typography.capability, vim.api.nvim_ui_send
+        local timeout, length = vim.o.ttimeout, vim.o.ttimeoutlen
+        vim.env.TMUX = 'test'
+        vim.api.nvim_ui_send = function() error('must not send a terminal query through tmux') end
+        for _, case in ipairs({ { 'kitty(0.49.2)', true }, { 'kitty(0.40.0)', true },
+            { 'kitty(0.39.0)', false }, { '', false }, { 'xterm(400)', false } }) do
+            typography.tmux = { allowed = true, terminal = case[1] }
+            typography.capability, typography.waiters = nil, {}
+            typography.probe()
+            equal(typography.capability, case[2])
+            equal({ vim.o.ttimeout, vim.o.ttimeoutlen }, { timeout, length })
+        end
+        vim.env.TMUX, typography.tmux, typography.capability, vim.api.nvim_ui_send = tmux, cached, capability, send
     end)
 
     external_test('PDF viewer turns real pages and rejects the end of the document', { 'magick', 'gs' }, function()
