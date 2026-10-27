@@ -1,0 +1,18 @@
+{
+  "render-markdown.nvim": {
+    "url": "https://github.com/MeanderingProgrammer/render-markdown.nvim",
+    "revision": "8e8795368391036643b622875a6da6a51bcd33f4",
+    "license": "MIT"
+  },
+  "budoux.lua": {
+    "url": "https://github.com/delphinus/budoux.lua",
+    "revision": "7f23658b127b9a74aae5b388fefcd997be30cbfc",
+    "license": "Apache-2.0"
+  },
+  "md-render.nvim": {
+    "url": "https://github.com/delphinus/md-render.nvim",
+    "revision": "4f6d73a276356bc23dbffa594d2a54dc978e98bb",
+    "role": "Japanese wrapping reference; kinsoku character sets adapted",
+    "license": "MIT"
+  }
+}

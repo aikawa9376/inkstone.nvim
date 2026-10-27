@@ -1,0 +1,56 @@
+*inkstone* *inkstone-japanese*  Japanese layout and Inkstone-specific behavior
+
+Use |inkstone.txt| for inherited configuration and API reference.
+
+SETUP
+>
+  require('inkstone').setup({
+    pipe_table = {
+      cell = 'trimmed',
+      wrap = true,
+      japanese = { enabled = true, budoux = true },
+    },
+  })
+<
+BudouX is bundled and runs offline. Japanese table wrapping prefers phrase
+boundaries and basic forbidden-start/forbidden-end character rules. If a column
+is too narrow to satisfy kinsoku, the width bound takes priority. Set
+japanese.budoux=false to keep kinsoku without phrase segmentation; set
+enabled=false to disable both Japanese boundary policies.
+
+LUA API
+>
+  local text = require('inkstone.text')
+  local phrases = text.segment('今日は天気がいいから散歩しましょう。')
+  local lines = text.wrap('「日本語」の表を、読みやすく。', 12)
+<
+The API returns strings without editing any buffer. Width follows Neovim's
+strdisplaywidth(). Normal Markdown paragraphs retain Neovim's ordinary wrapping.
+
+PERFORMANCE
+Code body decoration is viewport-bounded. Width summaries invalidate on edits
+and display-width options; their cache is bounded and released on buffer wipe.
+The initial block scan and native Tree-sitter parsing can still scale with
+block/document size. See doc/performance.md for measured scope and benchmarks.
+
+DISPLAY COMPATIBILITY
+>
+  require('inkstone').setup({
+    display_compat = { enabled = 'auto', kana = true, replacements = {} },
+  })
+<
+Kitty environment variables enable the default display-only workaround: halfwidth
+kana plus voiced/semi-voiced marks are painted as fullwidth equivalents in the
+same Neovim cells (e.g. ｶﾞ -> ガ, ﾊﾟ -> パ). All 112 kana/mark pairs are covered;
+pairs without a precomposed character use a fullwidth base and combining mark.
+Source buffers, search, yank and saved text retain the original bytes. Stock
+tmux is supported; neither terminal patches nor raw OSC output are used.
+
+enabled=true forces this on; false disables it. kana=false removes the builtin
+rules. replacements maps individual display clusters to equal-width text; rules
+containing controls or changing width are ignored. Rendered rows and virtual
+wrapped rows are handled, while concealed text remains hidden. Anti-conceal and
+disabled rendering restore source appearance. Unprocessed scratch buffers and
+arbitrary Unicode width disagreements are outside this feature's scope.
+
+vim:tw=78:ts=4:ft=help:norl:
