@@ -263,6 +263,33 @@ return function(test, equal, buffer)
         vim.api.nvim_buf_delete(buf, { force = true })
     end)
 
+    test('typography owns only its temporary cursorline suppression flag', function()
+        local typography = require('inkstone.core.typography')
+        local buf = buffer({ 'heading', 'body' })
+        local win = vim.api.nvim_get_current_win()
+        local previous = vim.w[win].auto_cursorline_disabled
+        typography.active[buf] = { win = win, entries = { { range = { 0, 0 } } } }
+        vim.api.nvim_win_set_cursor(win, { 1, 0 })
+        typography.sync_cursorline()
+        equal(vim.w[win].auto_cursorline_disabled, true)
+        vim.api.nvim_win_set_cursor(win, { 2, 0 })
+        typography.sync_cursorline()
+        equal(vim.w[win].auto_cursorline_disabled, previous)
+        vim.w[win].auto_cursorline_disabled = true
+        vim.api.nvim_win_set_cursor(win, { 1, 0 })
+        typography.sync_cursorline()
+        vim.api.nvim_win_set_cursor(win, { 2, 0 })
+        typography.sync_cursorline()
+        equal(vim.w[win].auto_cursorline_disabled, true)
+        vim.w[win].auto_cursorline_disabled = false
+        vim.api.nvim_win_set_cursor(win, { 1, 0 })
+        typography.sync_cursorline()
+        typography.clear(buf)
+        equal(vim.w[win].auto_cursorline_disabled, false)
+        vim.w[win].auto_cursorline_disabled = previous
+        vim.api.nvim_buf_delete(buf, { force = true })
+    end)
+
     test('fractional typography does not round space into the middle of words', function()
         local typography = require('inkstone.core.typography')
         local text = 'Images and diagrams and formatting'

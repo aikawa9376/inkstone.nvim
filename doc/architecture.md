@@ -165,7 +165,20 @@ place does not clear or resend every heading. Clearing an unrelated buffer is
 a no-op for placements. Changed geometry/content/entry sets erase only owned
 extents before native redraw. Command-line height changes preserve still-visible
 lines when their origin and width are unchanged. Floats and popup menus erase
-only intersecting lines before they draw, never the rest of the page.
+only intersecting lines before they draw, never the rest of the page. Decoration
+callbacks alone do not prove damage: post-flush snapshots of native cells and
+attributes suppress replays when a window-wide option redraw leaves the actual
+placement unchanged. Snapshot reads are limited to flagged/new visible rectangles;
+routine foreign-repaint recovery reuses their snapshots.
+
+With updated auto-cursorline.nvim, `sync_cursorline` temporarily owns
+`w:auto_cursorline_disabled` while the cursor is on a shown typography range.
+It restores the previous value on ordinary rows, buffer/window changes or
+typography clear, and does not claim an already true flag owned elsewhere.
+The optional loaded auto_cursorline module is notified immediately, so both
+active highlights and queued enable timers honor suppression. Source restored
+by anti-conceal retains normal cursorline behavior. No plugin is loaded just
+for this integration and no global cursorline setting is changed.
 
 A scoped 250ms timer recovers foreign repaint damage by reissuing identical
 multicells without a preceding glyph erase. Ordinary dirty-line replays use

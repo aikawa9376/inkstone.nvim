@@ -217,6 +217,13 @@ so an unrelated repaint can briefly show normal text before recovery. The
 terminal tests cover multicell size metadata, tmux refresh, pane offsets, source
 restoration and float occlusion; they do not prove every GPU/font combination.
 
+If you use `aikawa9376/auto-cursorline.nvim`, update it together with Inkstone.
+While the cursor is on enlarged/small rendered text, Inkstone temporarily
+suppresses auto-cursorline for that window. Moving to ordinary body text or
+restoring source resumes its normal delayed highlight. Other owners of the
+window suppression flag are preserved. Unchanged native screen cells also
+prevent a delayed highlight elsewhere from replaying every heading.
+
 `demo/rich.md` includes a table, image, scaled headings and small text for trying
 the views. From this checkout, `nvim --clean -u demo/rich_init.lua demo/rich.md`
 starts an isolated demo using already installed parsers and optional Snacks;

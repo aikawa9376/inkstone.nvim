@@ -3,6 +3,7 @@
 local M = { active = {}, drawn = {}, tmux = nil, pending = false }
 local ns = vim.api.nvim_create_namespace('inkstone.typography')
 local probe_timeout = 1200
+local cursorline_windows = {}
 local function kitty()
     return vim.env.KITTY_WINDOW_ID ~= nil or vim.env.TERM_PROGRAM == 'kitty'
 end
@@ -344,6 +345,21 @@ local function window_geometry(win, info, top)
         vim.api.nvim_win_get_width(win), vim.api.nvim_win_get_height(win), info.textoff }
 end
 
+-- Decoration callbacks can revisit a whole window for an option change even
+-- when the TUI's grid diff does not touch this placement. Only actual cells
+-- and attributes under the overlay indicate damage (e.g. delayed cursorline
+-- on an unrelated body row must not replay every heading).
+local function native_cells(rect)
+    local cells = {}
+    for row = rect.screen_row, rect.screen_row + rect.height - 1 do
+        for col = rect.screen_col, rect.screen_col + rect.width - 1 do
+            cells[#cells + 1] = vim.fn.screenstring(row, col)
+            cells[#cells + 1] = vim.fn.screenattr(row, col)
+        end
+    end
+    return cells
+end
+
 function M.paint(force)
     if M.painting or not M.tmux or not M.tmux.allowed or M.capability ~= true then return end
     M.painting = true
@@ -406,8 +422,12 @@ function M.paint(force)
     end
     for _, rect in ipairs(regions) do
         local old = previous[rect.key]
-        if force or (M.damaged and M.damaged[rect.key]) or not old
-            or old.payload ~= rect.payload or old.width ~= rect.width then out[#out + 1] = rect.payload end
+        local changed = not old or old.payload ~= rect.payload or old.width ~= rect.width
+        local revisit = changed or (M.damaged and M.damaged[rect.key])
+        rect.native = revisit and native_cells(rect) or old.native
+        if force or changed or (revisit and not vim.deep_equal(old.native, rect.native)) then
+            out[#out + 1] = rect.payload
+        end
     end
     M.drawn = regions
     M.damaged = {}
@@ -424,6 +444,42 @@ function M.schedule(force)
         M.pending, M.force = false, nil
         M.paint(repaint)
     end)
+end
+
+-- auto-cursorline can avoid writing a transient background over a multicell
+-- in the first place. Own only flags we change, and leave other suppressors
+-- intact. Normal body rows retain the user's delayed cursorline behavior.
+function M.sync_cursorline()
+    local blocked, changed = {}, false
+    local current = vim.api.nvim_get_current_win()
+    for buf, state in pairs(M.active) do
+        local win = state.win
+        if vim.api.nvim_win_is_valid(win) and vim.api.nvim_win_get_buf(win) == buf then
+            local row = vim.api.nvim_win_get_cursor(win)[1] - 1
+            for _, entry in ipairs(state.entries) do
+                if row >= entry.range[1] and row <= entry.range[2] then blocked[win] = true; break end
+            end
+        end
+    end
+    for win, saved in pairs(cursorline_windows) do
+        if not vim.api.nvim_win_is_valid(win) then cursorline_windows[win] = nil
+        elseif not blocked[win] then
+            if vim.w[win].auto_cursorline_disabled == true then
+                vim.w[win].auto_cursorline_disabled = saved.value
+                changed = changed or win == current
+            end
+            cursorline_windows[win] = nil
+        end
+    end
+    for win in pairs(blocked) do
+        if not cursorline_windows[win] and vim.w[win].auto_cursorline_disabled ~= true then
+            cursorline_windows[win] = { value = vim.w[win].auto_cursorline_disabled }
+            vim.w[win].auto_cursorline_disabled = true
+            changed = changed or win == current
+        end
+    end
+    local auto = package.loaded.auto_cursorline
+    if changed and type(auto) == 'table' and type(auto.cursor_moved) == 'function' then auto.cursor_moved() end
 end
 
 local function start()
@@ -475,6 +531,7 @@ function M.clear(buf, keep_waiter)
     if buf and not M.active[buf] and not painted then return end
     M.erase(function(rect) return not buf or rect.buf == buf end)
     if buf then M.active[buf] = nil else M.active = {} end
+    M.sync_cursorline()
     -- A pending terminal reply must still drain with its input guard held.
     -- The probe's bounded timer releases it even when no buffers remain.
     if not next(M.active) then
@@ -502,11 +559,13 @@ function M.update(context, extmarks)
     end
     M.active[context.buf] = { win = context.win, tick = tick, entries = entries,
         geometry = previous and previous.win == context.win and previous.geometry or nil }
+    M.sync_cursorline()
     start()
     M.schedule()
 end
 
 local group = vim.api.nvim_create_augroup('InkstoneTypography', { clear = true })
+vim.api.nvim_create_autocmd({ 'CursorMoved', 'CursorMovedI', 'BufEnter', 'WinEnter', 'WinClosed' }, { group = group, callback = M.sync_cursorline })
 vim.api.nvim_create_autocmd({ 'VimResized', 'FocusGained' }, { group = group, callback = function()
     if not next(M.active) and not M.probing and not next(M.waiters or {}) then return end
     M.erase(); M.tmux = nil

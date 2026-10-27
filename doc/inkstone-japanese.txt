@@ -81,6 +81,9 @@ anti_conceal. Existing paragraph/table replacements retain their
 own layout. Unsupported terminals keep normal text. See demo/rich.md and
 doc/rendering-features.md for examples and limits.
 See doc/rendering-features.md for all options and graphics ownership with Snacks.
+For auto-cursorline.nvim integration, update both plugins. Cursorline is
+temporarily suppressed on shown typography rows; body/source rows retain its
+normal delayed behavior. Global options and other suppression owners are preserved.
 
 LATEX
 Install utftex or latex2text (Arch: python-pylatexenc). Markdown formula ranges
