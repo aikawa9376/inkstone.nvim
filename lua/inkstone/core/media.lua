@@ -48,16 +48,29 @@ function M.collect(context, parser, marks)
         item.key = key .. ':' .. vim.fn.sha256(item.source)
         context.media[#context.media + 1] = item
     end
+    for _, item in ipairs(context.charts or {}) do add(item) end
     context.view:each_tree(parser, function(tree, language)
         local lang = language:lang()
         if not context.view:overlaps(tree:root()) then return end
         if lang == 'markdown_inline' and config.images then
-            local query = require('inkstone.core.ts').parse(lang, '(image) @image')
-            context.view:nodes(tree:root(), query, function(_, node)
+            local function collect(capture, node)
                 local destination = node:child('link_destination')
+                if capture == 'file' then
+                    local target = destination and destination.text:lower() or ''
+                    if not target:match('%.pdf$') and not target:match('%.pdf[?#]') then return end
+                end
                 local path = destination and M.resolve(context.buf, destination.text)
-                if path then add({ kind = 'image', row = node.start_row, col = node.start_col, source = path }) end
-            end)
+                if path then add({ kind = 'image', row = node.start_row, col = node.start_col,
+                    end_col = node.end_col, source = path, document = capture == 'file' }) end
+            end
+            local ts = require('inkstone.core.ts')
+            local root = tree:root()
+            context.view:nodes(root, ts.parse(lang, '(image) @image'), collect)
+            -- Ordinary links are common and can number in the thousands on
+            -- one logical row. Do not wrap/inspect each one just to find PDFs.
+            if root:named_child_count() > 0 and vim.treesitter.get_node_text(root, context.buf):lower():find('.pdf', 1, true) then
+                context.view:nodes(root, ts.parse(lang, '(inline_link) @file'), collect)
+            end
         elseif lang == 'markdown' and (config.mermaid or config.plantuml) then
             local query = require('inkstone.core.ts').parse(lang, '(fenced_code_block) @code')
             context.view:nodes(tree:root(), query, function(_, node)
@@ -77,12 +90,16 @@ local function close(entry)
 end
 
 function M.clear(buf)
+    local viewer = package.loaded['inkstone.core.viewer']
+    if viewer then viewer.clear(buf) end
     if M.pending[buf] then close(M.pending[buf]); M.pending[buf] = nil end
     for _, entry in pairs(M.cache[buf] or {}) do close(entry) end
     M.cache[buf] = nil
 end
 
 function M.reset()
+    local viewer = package.loaded['inkstone.core.viewer']
+    if viewer then viewer.clear() end
     for buf in pairs(M.cache) do M.clear(buf) end
     for buf in pairs(M.pending) do M.clear(buf) end
 end
@@ -106,11 +123,13 @@ function M.convert(item, config, callback)
     -- so cancellation/failure cannot poison another buffer's content cache.
     local temporary = base .. '-' .. tostring(vim.uv.hrtime())
     local generated = temporary .. '.png'
-    local input = temporary .. (item.kind == 'mermaid' and '.mmd' or '.puml')
+    local input = temporary .. (item.kind == 'mermaid' and '.mmd' or item.kind == 'chart' and '.svg' or '.puml')
     local written, err = pcall(vim.fn.writefile, vim.split(item.source, '\n', { plain = true }), input)
     if not written then callback(nil, tostring(err)); return end
     if item.kind == 'mermaid' then
         vim.list_extend(command, { '-i', input, '-o', generated, '-b', 'transparent', '-t', vim.o.background == 'light' and 'neutral' or 'dark' })
+    elseif item.kind == 'chart' then
+        vim.list_extend(command, { '-o', generated, input })
     else
         vim.list_extend(command, { '-tpng', input })
     end
@@ -130,12 +149,13 @@ function M.convert(item, config, callback)
     if started then item.process = process else vim.fn.delete(input); callback(nil, tostring(process)) end
 end
 
-function M.update(context, hidden)
+function M.update(context, hidden, editing)
     local buf, config = context.buf, context.config.media
     if not config.enabled then M.clear(buf); return end
     local requested = {}
     for _, item in ipairs(context.media or {}) do
-        if not hidden or item.row < hidden[1] or item.row > hidden[2] then requested[item.key] = item end
+        local restoring = editing and item.row >= editing[1] and item.row <= editing[2]
+        if not restoring and not item.document and (item.manual or not hidden or item.row < hidden[1] or item.row > hidden[2]) then requested[item.key] = item end
     end
     local entries = M.cache[buf] or {}
     M.cache[buf] = entries
@@ -149,7 +169,7 @@ function M.update(context, hidden)
     for key, item in pairs(requested) do
         -- Snacks' own document renderer already handles images and Mermaid.
         -- Do not allocate a second placement when it owns this buffer.
-        local native = vim.b[buf].snacks_image_attached and item.kind ~= 'plantuml'
+        local native = vim.b[buf].snacks_image_attached and (item.kind == 'image' or item.kind == 'mermaid')
             and image.config and image.config.enabled and image.config.doc.enabled
         if not native and not entries[key] then
             local entry = vim.deepcopy(item)
@@ -163,7 +183,7 @@ function M.update(context, hidden)
                 local ok, placement = pcall(image.placement.new, buf, path, {
                     pos = { item.row + 1, item.col or 0 }, inline = true, conceal = false,
                     max_width = math.min(config.max_width, require('inkstone.lib.env').win.width(context.win)),
-                    max_height = config.max_height, auto_resize = true,
+                    max_height = item.height or config.max_height, auto_resize = true,
                 })
                 if ok then entry.placement = placement else entry.error = tostring(placement) end
             end)
@@ -171,8 +191,8 @@ function M.update(context, hidden)
     end
 end
 
-function M.open()
-    local buf, win = vim.api.nvim_get_current_buf(), vim.api.nvim_get_current_win()
+function M.open(buf, win)
+    buf, win = buf or vim.api.nvim_get_current_buf(), win or vim.api.nvim_get_current_win()
     local config = require('inkstone.state').get(buf)
     if not config.media.enabled then return end
     local image, reason = M.backend()
@@ -183,11 +203,14 @@ function M.open()
         if err or not vim.api.nvim_buf_is_valid(buf) or vim.api.nvim_buf_get_changedtick(buf) ~= tick
             or not vim.api.nvim_win_is_valid(win) or vim.api.nvim_win_get_buf(win) ~= buf then return end
         local Context = require('inkstone.request.context')
-        local exists, context = pcall(Context.get, buf)
-        if not exists then context = Context.new(buf, win, config) end
+        local context = Context.transient(buf, win, config)
         M.collect(context, parser, {})
         local selected
-        for _, item in ipairs(context.media) do if item.row <= row and (not selected or item.row > selected.row) then selected = item end end
+        local col = vim.api.nvim_win_get_cursor(win)[2]
+        for _, item in ipairs(context.media) do
+            if item.row <= row and (not selected or item.row > selected.row
+                or (item.row == row and (item.col or 0) <= col and col < (item.end_col or math.huge))) then selected = item end
+        end
         if not selected then return end
         if M.pending[buf] then close(M.pending[buf]) end
         M.pending[buf] = selected
@@ -196,15 +219,7 @@ function M.open()
             M.pending[buf] = nil
             if not vim.api.nvim_buf_is_valid(buf) or vim.api.nvim_buf_get_changedtick(buf) ~= tick then return end
             if not path then vim.notify(error, vim.log.levels.WARN); return end
-            local target = vim.api.nvim_create_buf(false, true)
-            local width = math.max(1, math.min(config.media.max_width, vim.o.columns - 4))
-            local height = math.max(1, math.min(config.media.max_height, vim.o.lines - 4))
-            vim.api.nvim_open_win(target, true, { relative = 'editor', style = 'minimal', border = 'rounded',
-                width = width, height = height, row = math.floor((vim.o.lines - height) / 2), col = math.floor((vim.o.columns - width) / 2) })
-            vim.bo[target].bufhidden = 'wipe'
-            local placement = image.placement.new(target, path, { inline = false, width = width, height = height })
-            vim.api.nvim_create_autocmd('BufWipeout', { buffer = target, once = true, callback = function() placement:close() end })
-            vim.keymap.set('n', 'q', '<Cmd>close<CR>', { buffer = target })
+            require('inkstone.core.viewer').open(path, { origin = buf, config = config.media })
         end)
     end)
 end

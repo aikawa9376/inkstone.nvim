@@ -84,6 +84,22 @@ function M.check()
                 end
             end
         end
+        for _, kind in ipairs({ 'chart', 'viewer' }) do
+            local command = config.media[kind .. '_command']
+            if command[1] and vim.fn.executable(command[1]) == 1 then
+                vim.health.ok(kind .. ': ' .. table.concat(command, ' '))
+            else vim.health.warn(kind .. ' converter unavailable: ' .. tostring(command[1])) end
+        end
+    end
+
+    M.start('Kitty typography (optional)')
+    local typography = require('inkstone.core.typography')
+    if config.typography.enabled == false then vim.health.ok('disabled')
+    elseif not vim.api.nvim_ui_send then vim.health.warn('OSC 66 needs Neovim 0.12+; normal text is retained')
+    elseif typography.capability == true then vim.health.ok('Kitty 0.40+ text sizing detected')
+    else vim.health.info('Waiting for a Kitty 0.40+ XTVERSION reply; normal text is the fallback') end
+    if vim.env.TMUX and typography.tmux and not typography.tmux.allowed then
+        vim.health.warn('tmux passthrough is disabled; enable allow-passthrough on to use typography')
     end
 
     M.start('conflicts')

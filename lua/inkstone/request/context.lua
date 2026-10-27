@@ -13,6 +13,9 @@ local str = require('inkstone.lib.str')
 ---@field latex render.md.request.Latex
 ---@field used render.md.request.Used
 ---@field media? table[]
+---@field typography table[]
+---@field table_views? render.md.Range[]
+---@field charts? table[]
 local Context = {}
 Context.__index = Context
 
@@ -36,6 +39,7 @@ function Context.new(buf, win, config, view)
     self.latex = require('inkstone.request.latex').new()
     self.used = require('inkstone.request.used').new()
     self.tables = {}
+    self.typography = {}
     return self
 end
 
@@ -83,10 +87,15 @@ end
 ---@param config render.md.buf.Config
 ---@return render.md.request.Context?
 function M.new(buf, win, config)
-    local view = require('inkstone.request.view').new(buf)
-    local context = Context.new(buf, win, config, view)
+    local context = M.transient(buf, win, config)
     M.cache[buf] = context
     return context
+end
+
+-- Read-only actions must not replace an active render/async request context.
+function M.transient(buf, win, config)
+    local view = require('inkstone.request.view').new(buf)
+    return Context.new(buf, win, config, view)
 end
 
 ---@param buf integer

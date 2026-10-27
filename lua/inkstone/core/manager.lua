@@ -18,6 +18,8 @@ function M.init()
     vim.api.nvim_create_autocmd('BufWipeout', {
         group = M.group,
         callback = function(args)
+            require('inkstone.core.table_views').clear(args.buf)
+            require('inkstone.core.typography').clear(args.buf)
             require('inkstone.core.media').clear(args.buf)
             require('inkstone.core.folds').clear(args.buf)
             local decorator = ui.cache[args.buf]

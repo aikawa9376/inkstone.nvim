@@ -1,6 +1,18 @@
 ---@class render.md.Settings
 local M = {}
 
+---@class render.md.typography.Config
+---@field enabled boolean|'auto'
+---@field headings number[]
+---@field small number
+M.typography = {
+    default = { enabled = 'auto', headings = { 2, 1.5, 1.25, 1, 1, 1 }, small = .8 },
+    schema = function()
+        return { record = { enabled = { union = { { type = 'boolean' }, { enum = { 'auto' } } } },
+            headings = { list = { type = 'number' } }, small = { type = 'number' } } }
+    end,
+}
+
 ---@class render.md.folds.Config: render.md.base.Config
 ---@field code boolean
 ---@field callout boolean
@@ -23,12 +35,15 @@ M.folds = {
 ---@field cache_dir string
 ---@field mermaid_command string[]
 ---@field plantuml_command string[]
+---@field chart_command string[]
+---@field viewer_command string[]
 M.media = {
     default = {
         enabled = true, images = true, mermaid = true, plantuml = true,
         max_width = 80, max_height = 30, timeout = 15000,
         cache_dir = vim.fn.stdpath('cache') .. '/inkstone/media',
-        mermaid_command = { 'mmdc' }, plantuml_command = { 'plantuml' },
+        mermaid_command = { 'mmdc' }, plantuml_command = { 'plantuml' }, chart_command = { 'rsvg-convert' },
+        viewer_command = { 'magick' },
     },
     schema = function()
         return { record = {
@@ -37,6 +52,8 @@ M.media = {
             max_width = { type = 'number' }, max_height = { type = 'number' }, timeout = { type = 'number' },
             cache_dir = { type = 'string' },
             mermaid_command = { list = { type = 'string' } }, plantuml_command = { list = { type = 'string' } },
+            chart_command = { list = { type = 'string' } },
+            viewer_command = { list = { type = 'string' } },
         } }
     end,
 }
@@ -1741,6 +1758,9 @@ M.pipe_table.style = {
 M.pipe_table.default = {
     -- Turn on / off pipe table rendering.
     enabled = true,
+    view = 'table',
+    view_max_rows = 1000,
+    chart = { kind = 'bar', height = 12 },
     -- Additional modes to render pipe tables.
     render_modes = false,
     -- Pre configured settings largely for setting table border easier.
@@ -1796,6 +1816,9 @@ M.pipe_table.default = {
 ---@return render.md.Schema
 function M.pipe_table.schema()
     return M.base.schema({
+        view = { enum = { 'table', 'list', 'chart' } },
+        view_max_rows = { type = 'number' },
+        chart = { record = { kind = { enum = { 'bar', 'line' } }, height = { type = 'number' } } },
         preset = { enum = M.pipe_table.preset },
         cell = { enum = M.pipe_table.cell },
         wrap = { type = 'boolean' },

@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="720" viewBox="0 0 1200 720">
+  <defs><linearGradient id="bg"><stop stop-color="#23395b"/><stop offset="1" stop-color="#9ec5ab"/></linearGradient></defs>
+  <rect width="1200" height="720" fill="url(#bg)"/>
+  <g fill="none" stroke="white" stroke-opacity=".3">
+    <path d="M200 0V720M400 0V720M600 0V720M800 0V720M1000 0V720M0 180H1200M0 360H1200M0 540H1200"/>
+  </g>
+  <g fill="white" font-family="sans-serif" text-anchor="middle">
+    <text x="600" y="335" font-size="72">Inkstone</text>
+    <text x="600" y="405" font-size="30">Zoom · Pan · Fit</text>
+    <text x="100" y="90" font-size="28">top left</text>
+    <text x="1100" y="90" font-size="28">top right</text>
+    <text x="100" y="660" font-size="28">bottom left</text>
+    <text x="1100" y="660" font-size="28">bottom right</text>
+  </g>
+</svg>

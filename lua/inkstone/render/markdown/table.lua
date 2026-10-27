@@ -17,6 +17,14 @@ function Render:setup()
     if not self.config.enabled then
         return false
     end
+    local views = require('inkstone.core.table_views')
+    self.view = views.mode(self.context.buf, self.node:get(), self.config.view)
+    if self.view ~= 'table' and self.context.conceal.level > 1
+        and self.node.end_row - self.node.start_row < self.config.view_max_rows then
+        self.data = views.read(self.context, self.node:get(), true)
+        return #self.data.rows > 0
+    end
+    self.view = 'table'
     local parser = Parser.new(self.context, self.config)
     local data = parser:parse(self.node, self.marks)
     if not data then
@@ -28,6 +36,7 @@ end
 
 ---@protected
 function Render:run()
+    if self.view ~= 'table' then self:alternative(); return end
     local first_mark = #self.marks:get() + 1
     self:delimiter()
     local wrapped = {} ---@type table<integer, render.md.mark.Line[]>
@@ -55,6 +64,46 @@ function Render:run()
         -- Borders can live on adjacent blank rows, outside the table range.
         for i = first_mark, #marks do marks[i].table_range = range end
     end
+end
+
+function Render:alternative()
+    local views, context, data = require('inkstone.core.table_views'), self.context, self.data
+    local lines, chart = nil, nil
+    if self.view == 'list' then lines = views.cards(context, data)
+    else
+        local Chart = require('inkstone.text.chart')
+        local values = {}; for i, record in ipairs(data.rows) do values[i] = record.values end
+        local reason
+        chart, reason = Chart.data(data.headers, values)
+        if not chart then
+            lines = { { { reason, 'WarningMsg' } } }
+            vim.list_extend(lines, views.cards(context, data))
+        else
+            local media = require('inkstone.core.media')
+            if context.config.media.enabled and media.backend()
+                and vim.fn.executable(context.config.media.chart_command[1] or '') == 1 then
+                local normal = vim.api.nvim_get_hl(0, { name = 'Normal', link = false })
+                local function color(value, default) return value and ('#%06x'):format(value) or default end
+                local source = Chart.svg(chart, { kind = self.config.chart.kind,
+                    fg = color(normal.fg, '#d8dee9'), bg = color(normal.bg, '#20242c') })
+                context.charts[#context.charts + 1] = { kind = 'chart', row = data.range[1], col = 0,
+                    source = source, manual = true, height = self.config.chart.height }
+                lines = {}
+            else lines = Chart.lines(chart, context:window_width()) end
+        end
+    end
+    local first = #self.marks:get() + 1
+    local sr = data.range[1]
+    local source = vim.api.nvim_buf_get_lines(context.buf, sr, sr + 1, false)[1] or ''
+    local label = ('▾ Table · %s · %d rows'):format(self.view, #data.rows)
+    self.marks:add(self.config, false, sr, 0, { end_col = #source, conceal = '',
+        virt_text = { { label, self.config.head } }, virt_text_pos = 'inline' })
+    self.marks:replace(self.config, {
+        start_row = sr + 1, start_col = 0, end_row = self.node.end_row, end_col = self.node.end_col,
+    }, lines)
+    context.table_views[#context.table_views + 1] = data.range
+    local marks = self.marks:get()
+    for i = first, #marks do marks[i].table_view = data.range end
 end
 
 ---@private

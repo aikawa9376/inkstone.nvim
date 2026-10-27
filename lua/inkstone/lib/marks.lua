@@ -9,6 +9,9 @@ local log = require('inkstone.core.log')
 ---@field opts render.md.mark.Opts
 ---@field replace? render.md.mark.Line[]
 ---@field table_range? render.md.Range
+---@field table_view? render.md.Range
+---@field typography? render.md.Range
+---@field font_id? string
 
 ---@alias render.md.mark.Conceal boolean|render.md.Element
 

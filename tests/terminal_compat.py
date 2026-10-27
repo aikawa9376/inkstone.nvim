@@ -73,6 +73,10 @@ class TerminalTests(unittest.TestCase):
             if not data:
                 raise RuntimeError('tmux client exited')
             self.output.extend(data)
+            # The native parser has no PTY response callback. Supply its known
+            # XTVERSION identity when an application probes the real protocol.
+            if b'\x1b[>0q' in data:
+                os.write(self.fd, b'\x1bP>|' + getattr(self, 'terminal_version', b'kitty(0.49.2)') + b'\x1b\\')
             while data:
                 used = self.screen.test_commit_write_buffer(data, self.screen.test_create_write_buffer())
                 self.screen.test_parse_written_data()
@@ -236,6 +240,161 @@ class TerminalTests(unittest.TestCase):
         self.pump()
         self.assertNotIn('Code body', self.visible_text())
         self.assert_source()
+
+    def test_table_list_and_chart_toggles(self):
+        self.render(['BEFORE', '', '| Name | Before | After |', '| - | - | - |',
+                     '| Alpha | 20ms | 10ms |', '| Beta | 30ms | 15ms |', '', 'AFTER'], wrap=True)
+        self.lua("vim.api.nvim_win_set_cursor(0,{5,0}); require('inkstone.api').toggle_list(); vim.wait(150); vim.cmd('redraw!')")
+        self.pump()
+        text = self.visible_text()
+        self.assertIn('Table · list', text)
+        self.assertIn('• Name', text)
+        self.assertIn('Alpha', text)
+        self.assertNotIn('| Name |', text)
+        self.assertNotIn('│', text)
+        self.assert_source()
+        self.lua("vim.api.nvim_win_set_cursor(0,{5,0}); require('inkstone.api').render({buf=vim.api.nvim_get_current_buf()}); "
+                 "vim.wait(100); vim.cmd('redraw!')")
+        self.pump()
+        self.assertIn('| Name | Before | After |', self.visible_text())
+        self.assertNotIn('Table · list', self.visible_text())
+        self.assertNotIn('• Name', self.visible_text())
+        self.lua("vim.api.nvim_win_set_cursor(0,{3,0}); require('inkstone.api').render({buf=vim.api.nvim_get_current_buf()}); vim.wait(100)")
+        self.lua("require('inkstone.api').toggle_chart(); vim.wait(150); vim.cmd('redraw!')")
+        self.pump()
+        text = self.visible_text()
+        self.assertIn('Table · chart', text)
+        self.assertIn('█', text)
+        self.assertNotIn('• Name', text)
+        self.lua("require('inkstone.api').toggle_chart(); vim.api.nvim_win_set_cursor(0,{1,0}); "
+                 "require('inkstone.api').render({buf=vim.api.nvim_get_current_buf()}); vim.wait(150); vim.cmd('redraw!')")
+        self.pump()
+        self.assertIn('│', self.visible_text())
+        self.assert_source()
+
+    def test_kitty_font_sizes_repaint_and_cursor_restore(self):
+        self.tmux('set-option', '-g', 'allow-passthrough', 'on')
+        self.render(['BEFORE', '', '# Large 日本語', '', 'Normal <small>Small</small> after', '', 'AFTER'])
+        self.lua("vim.env.KITTY_WINDOW_ID='1'; local c=require('inkstone.state').get(vim.api.nvim_get_current_buf()); "
+                 "c.typography.enabled=true; require('inkstone.api').render({buf=vim.api.nvim_get_current_buf()}); "
+                 "vim.wait(300); vim.cmd('redraw!')")
+        self.pump(.4)
+
+        def scales():
+            return [cell['mcd'] for row in range(24) for cell in self.screen.cpu_cells(row) if cell.get('mcd')]
+
+        self.assertTrue(any(cell['scale'] == 2 for cell in scales()), self.visible_text())
+        self.assertTrue(any(cell['subscale_n'] == 4 and cell['subscale_d'] == 5 for cell in scales()), self.visible_text())
+        self.assertIn('AFTER', self.visible_text())
+        self.assert_source()
+
+        self.tmux('refresh-client')
+        self.pump(.4)
+        self.assertTrue(any(cell['scale'] == 2 for cell in scales()), self.visible_text())
+        self.lua("vim.api.nvim_win_set_cursor(0,{3,0}); require('inkstone.api').render({buf=vim.api.nvim_get_current_buf()}); "
+                 "vim.wait(150); vim.cmd('redraw!')")
+        self.pump(.3)
+        self.assertIn('# Large 日本語', self.visible_text())
+        self.assertFalse(any(cell['scale'] == 2 for cell in scales()), self.visible_text())
+        self.lua("vim.api.nvim_win_set_cursor(0,{1,0}); require('inkstone.api').render({buf=vim.api.nvim_get_current_buf()}); "
+                 "vim.wait(150); vim.cmd('redraw!')")
+        self.pump(.3)
+        self.assertTrue(any(cell['scale'] == 2 for cell in scales()), self.visible_text())
+        self.lua("require('inkstone.state').get(vim.api.nvim_get_current_buf()).typography.headings[1]=1.5; "
+                 "require('inkstone.api').render({buf=vim.api.nvim_get_current_buf()}); vim.wait(100)")
+        self.pump(.3)
+        self.assertTrue(any(cell['scale'] == 2 for cell in scales()), self.visible_text())
+        self.assertTrue(all(cell['subscale_n'] == 3 and cell['subscale_d'] == 4
+                            for cell in scales() if cell['scale'] == 2), self.visible_text())
+        self.lua("require('inkstone.api').typography(); vim.wait(100); vim.cmd('redraw!')")
+        self.pump(.3)
+        self.assertFalse(any(cell['scale'] != 1 or cell['subscale_d'] for cell in scales()), self.visible_text())
+        self.assert_source()
+
+    def test_kitty_font_sizes_with_extended_keys(self):
+        self.tmux('set-option', '-s', 'extended-keys', 'on')
+        self.test_kitty_font_sizes_repaint_and_cursor_restore()
+
+    def test_kitty_graphics_chart_and_viewer(self):
+        snacks = Path(os.environ.get('INKSTONE_SNACKS_RTP', Path.home() / '.local/share/nvim/lazy/snacks.nvim'))
+        if not (snacks / 'lua/snacks/init.lua').is_file():
+            self.skipTest('snacks.nvim is not installed')
+        self.tmux('set-option', '-g', 'allow-passthrough', 'on')
+        self.render(['BEFORE', '', '| Name | Value |', '| - | - |', '| Alpha | 20 |', '| Beta | 10 |', '', 'AFTER'], wrap=True)
+        self.lua('vim.opt.rtp:prepend(' + json.dumps(str(snacks)) + '); vim.env.KITTY_WINDOW_ID="1"; vim.env.SNACKS_KITTY="true"; '
+                 'require("snacks").setup({image={enabled=true,doc={enabled=false},math={enabled=false},cache='
+                 + json.dumps(str(self.root / 'snacks-cache')) + '}}); '
+                 'local c=require("inkstone.state").get(vim.api.nvim_get_current_buf()); c.media.cache_dir='
+                 + json.dumps(str(self.root / 'charts')) + '; '
+                 'vim.api.nvim_win_set_cursor(0,{5,0}); require("inkstone.api").toggle_chart(); '
+                 'vim.wait(1500); vim.cmd("redraw!")')
+        self.pump(.5)
+        self.assertGreater(self.screen.grman.image_count, 0, self.visible_text())
+        self.assertIn('Table · chart', self.visible_text())
+        self.assertNotIn('█', self.visible_text())
+        self.assert_source()
+        self.lua("require('inkstone.api').toggle_chart(); vim.api.nvim_win_set_cursor(0,{1,0}); "
+                 "require('inkstone.api').render({buf=vim.api.nvim_get_current_buf()}); vim.wait(300); vim.cmd('redraw!')")
+        self.pump(.3)
+        self.assertIn('│', self.visible_text())
+        image = self.root / 'gradient.png'
+        subprocess.run(['magick', '-size', '1600x900', 'gradient:red-blue', str(image)], check=True)
+        self.lua('_G.inkstone_viewer=require("inkstone.core.viewer").open(' + json.dumps(str(image))
+                 + ',{origin=vim.api.nvim_get_current_buf()}); vim.wait(1200); vim.cmd("redraw!")')
+        self.pump(.4)
+        self.assertIn('100%', self.visible_text())
+        self.lua("require('inkstone.core.viewer').action(_G.inkstone_viewer,'zoom_in'); vim.wait(800); vim.cmd('redraw!')")
+        self.pump(.3)
+        self.assertIn('125%', self.visible_text())
+        self.assertGreater(self.screen.grman.image_count, 1)
+        self.lua("vim.api.nvim_win_close(_G.inkstone_viewer.win,true); vim.wait(200); vim.cmd('redraw!')")
+        self.pump(.3)
+        self.assertNotIn('125%', self.visible_text())
+        self.assert_source()
+
+    def test_kitty_font_sizes_with_pane_offsets_and_floats(self):
+        self.tmux('set-option', '-g', 'allow-passthrough', 'on')
+        self.tmux('set-option', '-g', 'status', 'on')
+        self.tmux('set-option', '-g', 'status-position', 'top')
+        self.render(['BEFORE', '', '# Heading', '', 'BODY', '', 'AFTER'])
+        self.lua("vim.env.KITTY_WINDOW_ID='1'; require('inkstone.core.typography').tmux=nil; "
+                 "require('inkstone.api').render({buf=vim.api.nvim_get_current_buf()}); vim.wait(400); vim.cmd('redraw!')")
+        self.pump(.4)
+
+        def enlarged():
+            return [(row, col) for row in range(24) for col, cell in enumerate(self.screen.cpu_cells(row))
+                    if cell.get('mcd') and cell['mcd']['scale'] == 2]
+
+        self.assertTrue(enlarged(), self.visible_text())
+        self.assertTrue(all(row >= 3 for row, _ in enlarged()), enlarged())
+        self.lua("_G.cover=vim.api.nvim_open_win(vim.api.nvim_create_buf(false,true),false,"
+                 "{relative='editor',row=1,col=0,width=40,height=4,style='minimal',border='single'}); "
+                 "vim.api.nvim_buf_set_lines(vim.api.nvim_win_get_buf(_G.cover),0,-1,false,{'POPUP'}); vim.cmd('redraw!')")
+        self.pump(.4)
+        self.assertIn('POPUP', self.visible_text())
+        self.assertFalse(enlarged(), self.visible_text())
+        self.lua("vim.api.nvim_win_close(_G.cover,true); vim.cmd('redraw!')")
+        self.pump(.4)
+        self.assertTrue(enlarged(), self.visible_text())
+        self.tmux('split-window', '-h', '-b', '-l', '35', 'sleep 30')
+        self.pump(.8)
+        self.lua("require('inkstone.api').render({buf=vim.api.nvim_get_current_buf()}); vim.wait(300); vim.cmd('redraw!')")
+        self.pump(.4)
+        self.assertTrue(enlarged(), self.visible_text())
+        self.assertTrue(all(col >= 35 for _, col in enlarged()), enlarged())
+        self.assert_source()
+
+    def test_old_kitty_keeps_native_text(self):
+        self.terminal_version = b'kitty(0.39.0)'
+        self.tmux('set-option', '-g', 'allow-passthrough', 'on')
+        self.render(['BEFORE', '', '# Old kitty', '', 'AFTER'])
+        self.lua("vim.env.KITTY_WINDOW_ID='1'; require('inkstone.api').render({buf=vim.api.nvim_get_current_buf()}); "
+                 "vim.wait(250); vim.cmd('redraw!')")
+        self.pump(.4)
+        self.assertIn('Old kitty', self.visible_text())
+        self.assertNotIn(b'\x1b]66;', self.output)
+        self.assert_source()
+
 
 
 if __name__ == '__main__':

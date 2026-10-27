@@ -100,6 +100,7 @@ end
 
 ---@protected
 function Render:run()
+    if require('inkstone.core.typography').heading(self.context, self.marks, self.node, self.data) then return end
     self:sign(self.config, self.config.sign, self.data.sign, self.data.fg)
     local box = self:box(self:marker())
     self:background(box)

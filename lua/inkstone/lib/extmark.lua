@@ -28,6 +28,10 @@ function Extmark:get()
     return self.mark
 end
 
+function Extmark:shown()
+    return self.id ~= nil
+end
+
 -- Native extmarks move during edits. Reuse only if their actual coordinates
 -- still match the regenerated description (including an explicit end range).
 function Extmark:valid(ns, buf)

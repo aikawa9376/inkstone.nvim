@@ -1,0 +1,380 @@
+-- Kitty OSC 66 text is outside Neovim's grid. Reserve its cells, erase it
+-- before native redraws and replay it after the grid flush. Never change tmux.
+local M = { active = {}, drawn = {}, tmux = nil, pending = false }
+local ns = vim.api.nvim_create_namespace('inkstone.typography')
+local function kitty()
+    return vim.env.KITTY_WINDOW_ID ~= nil or vim.env.TERM_PROGRAM == 'kitty'
+end
+
+function M.wrap(data)
+    if vim.env.TMUX then return '\27Ptmux;' .. data:gsub('\27', '\27\27') .. '\27\\' end
+    return data
+end
+
+local function send(data)
+    if data ~= '' and vim.api.nvim_ui_send then vim.api.nvim_ui_send(M.wrap(data)) end
+end
+
+local function refresh_waiters()
+    local waiters = M.waiters or {}
+    M.waiters = {}
+    for buf, win in pairs(waiters) do
+        if vim.api.nvim_buf_is_valid(buf) and vim.api.nvim_win_is_valid(win) and vim.api.nvim_win_get_buf(win) == buf then
+            require('inkstone.core.ui').update(buf, win, 'TypographyReady', true)
+        end
+    end
+end
+
+function M.probe()
+    if M.probing or M.capability ~= nil then return end
+    M.probing = true
+    local autocmd, timer
+    local function done(supported)
+        if not M.probing then return end
+        M.probing, M.capability = false, supported
+        if timer and not timer:is_closing() then timer:stop(); timer:close() end
+        if autocmd then pcall(vim.api.nvim_del_autocmd, autocmd) end
+        M.probe_timer, M.probe_autocmd = nil, nil
+        refresh_waiters()
+    end
+    autocmd = vim.api.nvim_create_autocmd('TermResponse', { callback = function(event)
+        local sequence = type(event.data) == 'table' and event.data.sequence or event.data
+        if type(sequence) ~= 'string' then return end
+        local major, minor = sequence:match('kitty%((%d+)%.(%d+)')
+        if major then done(tonumber(major) > 0 or tonumber(minor) >= 40)
+        elseif sequence:match('^\27P>|') then done(false) end
+    end })
+    timer = vim.defer_fn(function() done(false) end, 1200)
+    M.probe_timer, M.probe_autocmd = timer, autocmd
+    send('\27[>0q')
+end
+
+function M.cancel_probe()
+    if M.probe_timer and not M.probe_timer:is_closing() then M.probe_timer:stop(); M.probe_timer:close() end
+    if M.probe_autocmd then pcall(vim.api.nvim_del_autocmd, M.probe_autocmd) end
+    M.probing, M.probe_timer, M.probe_autocmd = false, nil, nil
+end
+
+function M.retry()
+    if M.capability == true and M.tmux and M.tmux.allowed then return end
+    M.cancel_probe()
+    M.capability, M.tmux = nil, nil
+end
+
+function M.erase()
+    local out = {}
+    for _, rect in ipairs(M.drawn) do
+        out[#out + 1] = ('\27[%d;%dH\27[%dX'):format(rect.row, rect.col, rect.width)
+    end
+    M.drawn = {}
+    if #out > 0 then send('\27' .. '7' .. table.concat(out) .. '\27' .. '8') end
+end
+
+function M.refresh_tmux(callback)
+    if not vim.env.TMUX then
+        M.tmux = { top = 0, left = 0, allowed = true }
+        if M.capability == true then refresh_waiters() end
+        if callback then callback() end
+        return
+    end
+    if M.querying then return end
+    M.querying = true
+    local args = { 'tmux', 'display-message', '-p' }
+    if vim.env.TMUX_PANE then vim.list_extend(args, { '-t', vim.env.TMUX_PANE }) end
+    args[#args + 1] = '#{pane_top},#{pane_left},#{allow-passthrough},#{status},#{status-position}'
+    vim.system(args, { text = true, timeout = 1000 }, function(result)
+        vim.schedule(function()
+            M.querying = false
+            local top, left, allowed, status, position = (result.stdout or ''):match('(%d+),(%d+),([^,]*),([^,]*),([^%s]*)')
+            M.tmux = { top = tonumber(top) or 0, left = tonumber(left) or 0,
+                allowed = result.code == 0 and (allowed == 'on' or allowed == 'all') }
+            if position == 'top' and status ~= 'off' then M.tmux.top = M.tmux.top + (tonumber(status) or 1) end
+            if M.capability == true then refresh_waiters() end
+            if callback then callback() end
+        end)
+    end)
+end
+
+function M.supports(context)
+    if context.config.typography.enabled == false
+        or (context.config.typography.enabled ~= true and not kitty()) or not vim.api.nvim_ui_send
+        or #vim.api.nvim_list_uis() == 0 or vim.env.ZELLIJ then return false end
+    M.waiters = M.waiters or {}
+    if not M.tmux or (M.capability == nil and M.tmux.allowed) then M.waiters[context.buf] = context.win end
+    if not M.tmux then
+        M.refresh_tmux(function()
+            if M.tmux.allowed and next(M.waiters or {}) then M.probe()
+            elseif not M.tmux.allowed then M.waiters = {} end
+        end)
+    elseif M.tmux.allowed then M.probe() end
+    return M.tmux ~= nil and M.tmux.allowed and M.capability == true
+end
+
+function M.spec(ratio)
+    if not ratio or ratio <= 0 or ratio == 1 then return end
+    ratio = math.max(.25, math.min(7, ratio))
+    local scale = math.ceil(ratio)
+    local num, den, error = 1, 1, math.huge
+    for d = 1, 15 do
+        for n = 1, d do
+            local e = math.abs(scale * n / d - ratio)
+            if e < error then num, den, error = n, d, e end
+        end
+    end
+    return { scale = scale, num = num, den = den, ratio = scale * num / den }
+end
+
+function M.runs(chunks, spec)
+    local units = require('inkstone.parser.table').units(chunks)
+    local result, text, width, highlight = {}, {}, 0, nil
+    local limit = math.max(1, math.floor(7 * spec.den / spec.num))
+    local function flush()
+        if width == 0 then return end
+        local cells = math.max(1, math.ceil(width * spec.num / spec.den - 1e-8))
+        result[#result + 1] = { text = table.concat(text), width = cells * spec.scale, cells = cells, highlight = highlight }
+        text, width = {}, 0
+    end
+    for _, unit in ipairs(units) do
+        local clean = unit.text:gsub('[%c]', '')
+        if clean ~= '' and unit.width > 0 then
+            if width + unit.width > limit or (width > 0 and not vim.deep_equal(highlight, unit.highlight)) then flush() end
+            text[#text + 1], width, highlight = clean, width + unit.width, unit.highlight
+        end
+    end
+    flush()
+    return result
+end
+
+local function tag(marks, first, entry)
+    local list = marks:get()
+    for i = first, #list do list[i].typography, list[i].font_id = entry.range, entry.id end
+end
+
+function M.heading(context, marks, node, data)
+    if not M.supports(context) then return false end
+    local spec = M.spec(context.config.typography.headings[data.level])
+    -- Keep native layout for nested/indented headings and impossible widths.
+    if not spec or node.start_col ~= 0 or node:col() ~= 0 then return false end
+    local inline = node:child('inline')
+    if not inline then return false end
+    local line = require('inkstone.lib.display').line(context, inline)
+    if #line == 0 then return false end
+    local runs, lines = M.runs(line, spec), {}
+    local current, width, budget = {}, 0, context:window_width()
+    for _, run in ipairs(runs) do
+        if run.width > budget then return false end
+        if width + run.width > budget then lines[#lines + 1] = { runs = current, width = width }; current, width = {}, 0 end
+        current[#current + 1], width = run, width + run.width
+    end
+    if #current > 0 then lines[#lines + 1] = { runs = current, width = width } end
+    if #lines == 0 then return false end
+    local last = node.end_row - (node.end_col == 0 and 1 or 0)
+    local entry = { id = 'heading:' .. node.start_row, range = { node.start_row, last },
+        row = node.start_row, col = 0, spec = spec, lines = lines, highlight = data.fg, background = data.bg }
+    context.typography[#context.typography + 1] = entry
+    local first, virtual = #marks:get() + 1, {}
+    local function chunks(at)
+        local out = {}; for _, run in ipairs(at.runs) do out[#out + 1] = { run.text, run.highlight } end
+        return out
+    end
+    marks:over(context.config.heading, true, node, { conceal = '', virt_text = chunks(lines[1]), virt_text_pos = 'inline' })
+    for i = 1, #lines do
+        if i > 1 then virtual[#virtual + 1] = chunks(lines[i]) end
+        for _ = 2, spec.scale do virtual[#virtual + 1] = {} end
+    end
+    if #virtual > 0 then marks:add(context.config.heading, true, node.start_row, 0, { virt_lines = virtual }) end
+    if not data.atx then
+        marks:over(context.config.heading, true, data.marker, { conceal_lines = '' })
+    end
+    tag(marks, first, entry)
+    return true
+end
+
+function M.small(context, parser, marks)
+    if not M.supports(context) then return end
+    local spec = M.spec(context.config.typography.small)
+    if not spec then return end
+    local Marks = require('inkstone.lib.marks')
+    local own = Marks.new(context, false)
+    local seen = {}
+    context.view:each_tree(parser, function(tree, language)
+        if language:lang() ~= 'markdown_inline' or not context.view:overlaps(tree:root()) then return end
+        local sr, sc = tree:root():range()
+        local text = vim.treesitter.get_node_text(tree:root(), context.buf)
+        for i, source in ipairs(vim.split(text, '\n', { plain = true })) do
+            local row, base = sr + i - 1, i == 1 and sc or 0
+            for start, body, finish in source:gmatch('()<small>(.-)</small>()') do
+                local col, stop = base + start - 1, base + finish - 1
+                local key = row .. ':' .. col
+                local replaced = false
+                for _, mark in ipairs(marks) do
+                    if (mark.replace or mark.table_view or mark.typography) and row >= mark.start_row
+                        and row <= (mark.opts.end_row or mark.start_row) then replaced = true; break end
+                end
+                local opening = tree:root():named_descendant_for_range(row, col, row, col + 7)
+                if opening and opening:type() == 'html_tag' and not seen[key] and not replaced and body ~= '' then
+                    seen[key] = true
+                    local line = require('inkstone.lib.display').line(context, { start_row = row, end_row = row,
+                        start_col = col + 7, end_col = stop - 8, text = body })
+                    local runs = M.runs(line, spec)
+                    local width = 0; for _, run in ipairs(runs) do width = width + run.width end
+                    local entry = { id = 'small:' .. key, range = { row, row }, row = row, col = col,
+                        last_col = stop, spec = spec, lines = { { runs = runs, width = width } },
+                        erase_width = require('inkstone.lib.str').line_width(line) }
+                    context.typography[#context.typography + 1] = entry
+                    local first = #own:get() + 1
+                    own:add(context.config.paragraph, true, row, col, { end_col = stop, conceal = '',
+                        virt_text = line, virt_text_pos = 'inline' })
+                    tag(own, first, entry)
+                end
+            end
+        end
+    end)
+    vim.list_extend(marks, own:get())
+end
+
+function M.filter(context, marks)
+    if #context.typography == 0 then return marks end
+    local result = {}
+    for _, mark in ipairs(marks) do
+        local inside = false
+        if not mark.font_id then
+            for _, entry in ipairs(context.typography) do
+                if mark.start_row >= entry.range[1] and mark.start_row <= entry.range[2]
+                    and (not entry.last_col or (mark.start_col >= entry.col and mark.start_col < entry.last_col)) then inside = true; break end
+            end
+        end
+        if not inside then result[#result + 1] = mark end
+    end
+    return result
+end
+
+local function colors(highlight, fallback)
+    local result = {}
+    local names = type(highlight) == 'table' and highlight or { highlight or fallback or 'Normal' }
+    for _, name in ipairs(names) do
+        local ok, value = pcall(vim.api.nvim_get_hl, 0, { name = name, link = false })
+        if ok then for k, v in pairs(value) do result[k] = v end end
+    end
+    local out = { '\27[0m' }
+    if result.fg then out[#out + 1] = ('\27[38;2;%d;%d;%dm'):format(math.floor(result.fg / 65536), math.floor(result.fg / 256) % 256, result.fg % 256) end
+    if result.bg then out[#out + 1] = ('\27[48;2;%d;%d;%dm'):format(math.floor(result.bg / 65536), math.floor(result.bg / 256) % 256, result.bg % 256) end
+    if result.bold then out[#out + 1] = '\27[1m' end
+    return table.concat(out)
+end
+
+local function covered(win, row, col, height, width)
+    if vim.fn.pumvisible() == 1 then return true end
+    for _, other in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
+        local cfg = vim.api.nvim_win_get_config(other)
+        if other ~= win and cfg.relative ~= '' and not cfg.hide then
+            local pos = vim.api.nvim_win_get_position(other)
+            if row <= pos[1] + vim.api.nvim_win_get_height(other) + 2 and row + height > pos[1]
+                and col <= pos[2] + vim.api.nvim_win_get_width(other) + 2 and col + width > pos[2] then return true end
+        end
+    end
+    return false
+end
+
+function M.paint()
+    if M.painting or not M.tmux or not M.tmux.allowed or M.capability ~= true then return end
+    M.painting = true
+    local out, regions = {}, {}
+    -- A size/color update can reuse identical grid extmarks and therefore
+    -- produce no native redraw. Clear the previous extent in the same packet
+    -- before drawing a narrower run, so old multicell tails cannot survive.
+    for _, rect in ipairs(M.drawn) do
+        out[#out + 1] = ('\27[%d;%dH\27[%dX'):format(rect.row, rect.col, rect.width)
+    end
+    for buf, state in pairs(M.active) do
+        if vim.api.nvim_buf_is_valid(buf) and vim.api.nvim_buf_get_changedtick(buf) == state.tick
+            and vim.api.nvim_win_is_valid(state.win) and vim.api.nvim_win_get_buf(state.win) == buf
+            and vim.api.nvim_win_get_tabpage(state.win) == vim.api.nvim_get_current_tabpage() then
+            local win = state.win
+            local info = vim.fn.getwininfo(win)[1]
+            local top, bottom = info.winrow, info.winrow + info.height - 1
+            local left, right = info.wincol + info.textoff, info.wincol + info.width - 1
+            for _, entry in ipairs(state.entries) do
+                local pos = vim.fn.screenpos(win, entry.row + 1, entry.col + 1)
+                for i, line in ipairs(entry.lines) do
+                    local row, col = pos.row + (i - 1) * entry.spec.scale, pos.col
+                    local width = math.max(line.width, entry.erase_width or 0)
+                    if pos.row > 0 and row >= top and row + entry.spec.scale - 1 <= bottom
+                        and col >= left and col + width - 1 <= right
+                        and not covered(win, row, col, entry.spec.scale, width) then
+                        local at_row, at_col = row + M.tmux.top, col + M.tmux.left
+                        out[#out + 1] = ('\27[%d;%dH\27[%dX'):format(at_row, at_col, width)
+                        regions[#regions + 1] = { row = at_row, col = at_col, width = width }
+                        for _, run in ipairs(line.runs) do
+                            local spec = entry.spec
+                            out[#out + 1] = ('\27[%d;%dH'):format(at_row, at_col)
+                            out[#out + 1] = colors(run.highlight, entry.highlight)
+                            local meta = ('s=%d:w=%d'):format(spec.scale, run.cells)
+                            if spec.num < spec.den then meta = meta .. (':n=%d:d=%d:v=2'):format(spec.num, spec.den) end
+                            out[#out + 1] = '\27]66;' .. meta .. ';' .. run.text .. '\27\\'
+                            at_col = at_col + run.width
+                        end
+                    end
+                end
+            end
+        end
+    end
+    M.drawn = regions
+    if #out > 0 then send('\27' .. '7' .. table.concat(out) .. '\27[0m\27' .. '8') end
+    M.painting = false
+end
+
+function M.schedule()
+    if M.pending or not next(M.active) then return end
+    M.pending = true
+    vim.schedule(function() M.pending = false; M.paint() end)
+end
+
+local function start()
+    if M.timer then return end
+    vim.api.nvim_set_decoration_provider(ns, {
+        on_start = function() if not M.painting then M.erase() end end,
+        on_end = M.schedule,
+    })
+    M.timer = vim.uv.new_timer()
+    M.timer:start(250, 250, vim.schedule_wrap(M.schedule))
+end
+
+function M.clear(buf, keep_waiter)
+    local painted = #M.drawn > 0
+    M.erase()
+    if buf then M.active[buf] = nil else M.active = {} end
+    if buf and M.waiters and not keep_waiter then M.waiters[buf] = nil elseif not buf then M.waiters = {} end
+    if not next(M.waiters or {}) then M.cancel_probe() end
+    if not next(M.active) then
+        if M.timer then M.timer:stop(); M.timer:close(); M.timer = nil end
+        vim.api.nvim_set_decoration_provider(ns, {})
+    else M.schedule() end
+    if painted then vim.schedule(function() if vim.v.dying == 0 then vim.cmd('redraw!') end end) end
+end
+
+function M.update(context, extmarks)
+    local shown, entries = {}, {}
+    for _, extmark in ipairs(extmarks) do
+        local mark = extmark:get()
+        if extmark:shown() and mark.font_id then shown[mark.font_id] = true end
+    end
+    for _, entry in ipairs(context.typography) do if shown[entry.id] then entries[#entries + 1] = entry end end
+    if #entries == 0 then
+        if M.active[context.buf] then M.clear(context.buf, context.config.typography.enabled ~= false) end
+        return
+    end
+    M.active[context.buf] = { win = context.win, tick = vim.api.nvim_buf_get_changedtick(context.buf), entries = entries }
+    start()
+    M.schedule()
+end
+
+local group = vim.api.nvim_create_augroup('InkstoneTypography', { clear = true })
+vim.api.nvim_create_autocmd({ 'VimResized', 'FocusGained' }, { group = group, callback = function()
+    if not next(M.active) and not M.probing and not next(M.waiters or {}) then return end
+    M.erase(); M.tmux = nil
+    M.refresh_tmux(function() M.schedule() end)
+end })
+vim.api.nvim_create_autocmd('VimLeavePre', { group = group, callback = function() M.clear() end })
+
+return M

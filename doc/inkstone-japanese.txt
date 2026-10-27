@@ -29,20 +29,49 @@ The API returns strings without editing any buffer. Width follows Neovim's
 strdisplaywidth(). Top-level paragraphs use this layout by default. Soft source
 newlines join; explicit Markdown hard breaks remain. Cursor entry restores the
 whole source paragraph. Set paragraph.wrap=false for Neovim's ordinary wrapping.
+
+Tables with wrapped replacement rows restore the whole source table when the
+cursor enters any table row. Borders and inline decorations return when the
+cursor leaves. This also applies with anti_conceal.enabled=false; normal source
+wrap/nowrap behavior remains visible while editing.
 Nested list/quote paragraphs, image anchors and converted math keep source rows.
 
 MEDIA AND FOLDS
 :Inkstone media opens the image/diagram at or before the cursor in a floating
-view (q closes it). Images use the optional Snacks image backend. Mermaid and
+view. + / - zoom; hjkl pan; 0 fits; [ / ] change PDF page; q or Escape close it.
+Ordinary PDF links and #page=N are recognized. The viewport needs ImageMagick,
+and PDFs also need its Ghostscript delegate. Images use the optional Snacks image backend. Mermaid and
 PlantUML conversion additionally require the local mmdc/plantuml executables.
 Conversion runs asynchronously; missing dependencies leave readable source.
 Use :checkhealth inkstone and :checkhealth snacks to inspect dependencies.
 
 :Inkstone toggle_fold toggles the containing code block, callout or details.
 <Plug>(InkstoneToggleFold) can be mapped without replacing existing keybindings.
-The side preview maps za and <CR>. Callout [!NOTE]- and details without open start
+The side preview maps za and <CR> to toggle_view. Callout [!NOTE]- and details without open start
 collapsed; code blocks start expanded. Source bytes and foldmethod are unchanged.
 Set folds.enabled=false or media.enabled=false to disable these features.
+
+TABLE VIEWS
+:Inkstone toggle_table cycles table -> list -> chart -> table under the cursor.
+:Inkstone toggle_list switches table/list; :Inkstone toggle_chart switches
+table/chart. Nonnumeric tables skip charts. Numeric series must share units.
+Charts use rsvg-convert and Snacks, with text bars when those are unavailable.
+pipe_table.view chooses the default; pipe_table.chart.kind is bar or line.
+:Inkstone toggle_view chooses the table, fold or media at the cursor.
+<Plug>(InkstoneToggleView), <Plug>(InkstoneToggleTable),
+<Plug>(InkstoneToggleList) and <Plug>(InkstoneToggleChart) are mappable actions.
+Table view state follows edits; source data is never rewritten.
+
+KITTY TYPOGRAPHY
+Kitty >= 0.40 and Neovim >= 0.12 support actual text sizing through OSC 66.
+typography.enabled='auto' requires a positive terminal reply. Default heading
+sizes are {2, 1.5, 1.25, 1, 1, 1}; literal single-line <small>text</small> uses
+typography.small=0.8. :Inkstone typography toggles it for the current buffer.
+Stock tmux requires allow-passthrough on. Inkstone accounts for pane offsets
+and replays text after redraw; popup windows take precedence. Original source
+returns for cursor editing. Existing paragraph/table replacements retain their
+own layout. Unsupported terminals keep normal text. See demo/rich.md and
+doc/rendering-features.md for examples and limits.
 See doc/rendering-features.md for all options and graphics ownership with Snacks.
 
 PERFORMANCE

@@ -36,3 +36,8 @@ MIT License, Copyright (c) 2026 delphinus. The license is retained at
 JIS-inspired forbidden-start / forbidden-end character sets were adapted in
 `lua/inkstone/text/layout.lua`. The wrapping algorithm in Inkstone is separate;
 full JIS X 4051 conformance is not claimed.
+
+Its `text_size.lua` was also consulted for OSC 66 lifecycle constraints
+(reserved cells, erasure before native redraw and replay afterward). Inkstone's
+typography implementation is separate and includes stock-tmux passthrough,
+pane offsets and source restoration in the existing rendering pipeline.

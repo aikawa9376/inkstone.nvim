@@ -16,6 +16,9 @@ M.cache = {}
 
 ---called from state on setup
 function M.setup()
+    require('inkstone.core.typography').clear()
+    local table_views = require('inkstone.core.table_views')
+    for buf in pairs(table_views.cache) do table_views.clear(buf) end
     require('inkstone.lib.layout_cache').cache = {}
     require('inkstone.core.media').reset()
     local folds = require('inkstone.core.folds')
@@ -122,7 +125,8 @@ function Updater:run()
 end
 
 ---@private
-function Updater:clear()
+function Updater:clear(refreshing)
+    require('inkstone.core.typography').clear(self.buf, refreshing)
     self.decorator:clear(M.ns)
     vim.api.nvim_buf_clear_namespace(self.buf, M.ns, 0, -1)
     state.on.clear({ buf = self.buf, win = self.win })
@@ -138,7 +142,7 @@ function Updater:render()
             local initial = self.decorator:initial()
             -- A custom clear callback may depend on seeing an empty namespace.
             if state.on.clear ~= require('inkstone.settings').on.default.clear then
-                self:clear()
+                self:clear(true)
                 self.decorator:set(extmarks)
             else
                 self.decorator:replace(M.ns, extmarks)
@@ -187,7 +191,8 @@ function Updater:display()
         return self:hide(extmark, range)
     end)
     local context = Context.get(self.buf)
-    require('inkstone.core.media').update(context, range)
+    require('inkstone.core.typography').update(context, self.decorator:get())
+    require('inkstone.core.media').update(context, range, self.editing)
     state.on.render({ buf = self.buf, win = self.win })
 end
 
@@ -198,6 +203,9 @@ function Updater:editing_table()
     local context = Context.get(self.buf)
     for _, range in ipairs(context.tables or {}) do
         if row and row >= range[1] and row <= range[2] then return range end
+    end
+    for _, range in ipairs(context.table_views or {}) do
+        if row and row > range[1] and row <= range[2] then return range end
     end
 end
 
@@ -232,8 +240,14 @@ end
 function Updater:hide(extmark, range)
     local mark = extmark:get()
 
+    if mark.typography then
+        local row = env.row.get(self.buf, self.win)
+        if row and row >= mark.typography[1] and row <= mark.typography[2] then return true end
+        if range and range[1] <= mark.typography[2] and range[2] >= mark.typography[1] then return true end
+    end
+
     local editing = self.editing
-    local owner = mark.table_range
+    local owner = mark.table_range or mark.table_view
     if editing and (extmark:overlaps(editing)
         or (owner and owner[1] == editing[1] and owner[2] == editing[2])) then
         return true

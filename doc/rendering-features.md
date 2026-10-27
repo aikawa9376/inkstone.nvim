@@ -1,4 +1,4 @@
-# Paragraphs, media and folds
+# Paragraphs, table views, media, typography and folds
 
 These features render without changing source bytes. Search, yank and save keep
 the original Markdown. `:Inkstone disable` restores source rendering.
@@ -73,9 +73,101 @@ placements, while leaving the Snacks image backend available. PlantUML is
 handled by Inkstone.
 
 `:Inkstone media` opens a floating view for the image or diagram at/before the
-cursor. Press `q` to close it. Missing backends/converters leave the Markdown
-readable; the manual command and health checks explain missing dependencies.
+cursor. It also recognizes ordinary PDF links such as `[paper](paper.pdf#page=3)`.
+The viewport uses ImageMagick (`media.viewer_command = { 'magick' }`); PDF
+rasterization also needs its Ghostscript delegate. Keys are `+` / `-` for zoom,
+`hjkl` for pan, `0` for fit, `[` / `]` for PDF pages and `q` / Escape to close.
+The mouse wheel zooms. Cropping is asynchronous and bounded to the viewport;
+later interactions supersede earlier results. The last page stays visible if
+page-forward goes past the document. Temporary crops and jobs are released on
+close, source wipe, disable and setup. HTTP(S) resources use Snacks' downloader.
+Missing backends/converters leave the Markdown readable; the manual command
+and health checks explain missing dependencies.
 This integration does not implement animated video playback.
+
+## Table / list / chart
+
+Place the cursor in a table and run `:Inkstone toggle_table` to cycle through
+table → list → chart → table. `:Inkstone toggle_list` switches between table and
+list; `:Inkstone toggle_chart` switches between table and chart. A table without
+numeric columns skips the chart during cycling. An explicit chart request
+explains why it cannot chart the data.
+
+```lua
+require('inkstone').setup({
+    pipe_table = {
+        view = 'table', -- default view; 'list' / 'chart' also available
+        view_max_rows = 1000,
+        chart = { kind = 'bar', height = 12 }, -- kind can be 'line'
+    },
+})
+vim.keymap.set('n', '<leader>mv', '<Plug>(InkstoneToggleView)')
+vim.keymap.set('n', '<leader>ml', '<Plug>(InkstoneToggleList)')
+vim.keymap.set('n', '<leader>mg', '<Plug>(InkstoneToggleChart)')
+```
+
+The unified `:Inkstone toggle_view` / `<Plug>(InkstoneToggleView)` action cycles
+table views, toggles the containing fold or opens media, in that order. The
+side preview maps Enter and `za` to that action. Ordinary source buffers keep
+their existing keybindings. `<Plug>(InkstoneToggleTable)` is the table-only cycle.
+
+List view follows LazyAgent's column-name/value cards, preserving rendered
+inline chunks and Japanese wrapping. Chart view treats numeric columns as
+series and the first nonnumeric column as category labels. Decimal, scientific
+notation, correctly grouped thousands, negative/zero values and consistent
+unit suffixes are supported. Empty cells, `-` and `—` are gaps. Series with
+different units are rejected instead of sharing a misleading axis. Data is
+never executed as code.
+
+Charts are generated as SVG, rasterized by `media.chart_command = { 'rsvg-convert' }`
+and displayed through Snacks. Without that backend/converter they use text bars.
+The alternate view's header remains a visible interaction anchor. Entering a
+body source row restores the whole source table for editing and hides its chart;
+returning to the header or leaving restores the chosen view. Per-table state
+follows row insertions with native extmark anchors and resets on wipe/setup.
+Source bytes are unchanged. Views are bounded by `view_max_rows`; source edits
+can invalidate a selected table when the whole anchored range is removed.
+
+## Kitty text sizing
+
+Kitty 0.40+ and Neovim 0.12+ can display genuinely larger/smaller text using
+[OSC 66](https://sw.kovidgoyal.net/kitty/text-sizing-protocol/). This changes
+the displayed text size, with original Markdown retained for editing/yank/save.
+Support requires a positive Kitty XTVERSION reply; other terminals and headless
+sessions keep normal text and do not reserve extra rows.
+
+```lua
+require('inkstone').setup({
+    typography = {
+        enabled = 'auto', -- false disables; :Inkstone typography toggles this buffer
+        headings = { 2, 1.5, 1.25, 1, 1, 1 }, -- H1 through H6
+        small = 0.8,
+    },
+})
+```
+
+Top-level headings reserve enough rows for their scaled text and wrap to the
+available width. Literal single-line `<small>supporting text</small>` spans use
+the smaller size. Nested/indented headings and spans already replaced by table
+or paragraph layouts retain their existing rendering. Set `paragraph.wrap = false`
+when using small spans in long paragraphs. Unrepresentable narrow placements
+fall back to normal text. Fractional sizes use the protocol's rational bounds.
+
+Stock tmux works with `set -g allow-passthrough on`. Inkstone reads the pane
+offset and top status-bar height and uses standard passthrough; it does not
+patch tmux or change its options. Raw text is erased before Neovim redraws and
+replayed afterward, with a 250ms recovery tick while placements exist. Floating
+windows and popup menus take precedence. Cursor entry restores source text;
+disable/setup/wipe stop owned placement timers. This is a terminal text overlay,
+so an unrelated repaint can briefly show normal text before recovery. The
+terminal tests cover multicell size metadata, tmux refresh, pane offsets, source
+restoration and float occlusion; they do not prove every GPU/font combination.
+
+`demo/rich.md` includes a table, image, scaled headings and small text for trying
+the views. From this checkout, `nvim --clean -u demo/rich_init.lua demo/rich.md`
+starts an isolated demo using already installed parsers and optional Snacks;
+it installs nothing and does not alter dotfiles. Enter is the unified action
+in this demo. `:checkhealth inkstone` reports typography and converter availability.
 
 ## Folding
 
@@ -90,7 +182,7 @@ require('inkstone').setup({
 vim.keymap.set('n', '<leader>mf', '<Plug>(InkstoneToggleFold)')
 ```
 
-The side preview has buffer-local `za` and `<CR>` mappings. Code blocks start
+The side preview has buffer-local `za` and `<CR>` view actions. Code blocks start
 expanded. Obsidian callouts beginning with `> [!NOTE]-` start collapsed;
 `> [!NOTE]+` starts expanded. `<details>` starts collapsed unless it has an
 `open` attribute. A `<summary>` on the opening line or following line supplies
@@ -98,6 +190,14 @@ its title. Nested details are supported. Toggle state follows inserted lines
 using buffer-local extmark anchors and is released on buffer wipe/setup.
 
 ## ACP tables
+
+When a table contains wrapped replacement rows, entering any row of that table
+restores the whole table's source. This removes its virtual rows, table borders
+and inline decorations together, so a long link destination cannot mix a raw
+source row with the rendered table layout. Moving outside restores the rendered
+table. This also applies with `anti_conceal.enabled = false`. While editing,
+Neovim's normal source wrapping remains visible; `nowrap` clips source rows.
+Source bytes, yank and save are unchanged.
 
 ACP transcripts often indent each source row by one space. Wrapped virtual
 table rows retain this prefix, matching source-based rows, delimiter and outer

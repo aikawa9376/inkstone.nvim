@@ -53,8 +53,8 @@ function M.open(src_buf)
     M.copy_cursor(src_win, dst_win)
     for _, key in ipairs({ 'za', '<CR>' }) do
         vim.keymap.set('n', key, function()
-            require('inkstone.core.folds').toggle(dst_buf, dst_win)
-        end, { buffer = dst_buf, desc = 'Toggle Markdown fold' })
+            require('inkstone.core.actions').toggle(dst_buf, dst_win)
+        end, { buffer = dst_buf, desc = 'Toggle Markdown view' })
     end
 
     vim.api.nvim_create_autocmd({ 'CursorMoved', 'CursorMovedI' }, {

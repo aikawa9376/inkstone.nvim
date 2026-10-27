@@ -73,6 +73,30 @@ function M.toggle_fold()
     require('inkstone.core.folds').toggle()
 end
 
+function M.toggle_table()
+    require('inkstone.core.table_views').toggle()
+end
+
+function M.toggle_view()
+    require('inkstone.core.actions').toggle()
+end
+
+function M.toggle_list()
+    require('inkstone.core.table_views').toggle(nil, nil, 'list')
+end
+
+function M.toggle_chart()
+    require('inkstone.core.table_views').toggle(nil, nil, 'chart')
+end
+
+function M.typography()
+    local buf, win = vim.api.nvim_get_current_buf(), vim.api.nvim_get_current_win()
+    local config = require('inkstone.state').get(buf).typography
+    config.enabled = config.enabled == false
+    if config.enabled then require('inkstone.core.typography').retry() end
+    require('inkstone.core.ui').update(buf, win, 'TypographyToggle', true)
+end
+
 function M.media()
     require('inkstone.core.media').open()
 end
