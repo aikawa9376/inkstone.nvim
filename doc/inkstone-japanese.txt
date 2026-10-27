@@ -74,7 +74,9 @@ Outside tmux, detection temporarily guards ttimeout/ttimeoutlen for up to 1.2s,
 then restores them, so split replies do not become mapped input at short timeouts.
 Stock tmux requires allow-passthrough on. Inkstone accounts for pane offsets
 and replays damaged text after redraw; cursor-only updates do not erase intact
-overlays. Popup windows take precedence. Original source returns according to
+overlays. Command-line input and non-overlapping fzf/float updates leave other
+headings intact. Popup windows take precedence only where they overlap; recovery
+replays unchanged glyphs without first clearing them. Original source returns according to
 anti_conceal. Existing paragraph/table replacements retain their
 own layout. Unsupported terminals keep normal text. See demo/rich.md and
 doc/rendering-features.md for examples and limits.

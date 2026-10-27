@@ -388,6 +388,103 @@ class TerminalTests(unittest.TestCase):
         self.assertEqual(int(self.lua('print(_G.typography_erases)')), 0)
         self.assert_source()
 
+    def test_command_input_and_unrelated_float_do_not_erase_typography(self):
+        self.tmux('set-option', '-g', 'allow-passthrough', 'on')
+        self.render(['BEFORE', '', '# Heading', '', 'BODY', '', 'AFTER'])
+        self.lua("vim.env.KITTY_WINDOW_ID='1'; require('inkstone.api').render({buf=vim.api.nvim_get_current_buf()}); vim.wait(150)")
+        self.pump(.3)
+        self.lua("local t=require('inkstone.core.typography'); local erase=t.erase; _G.typography_erases=0; "
+                 "t.erase=function(...) _G.typography_erases=_G.typography_erases+1; return erase(...) end")
+        os.write(self.fd, b':echo "')
+        for char in b'command input':
+            os.write(self.fd, bytes([char]))
+            self.pump(.025)
+        os.write(self.fd, b'\x1b')
+        self.pump(.08)
+        self.assertEqual(int(self.lua('print(_G.typography_erases)')), 0)
+        for height in (2, 1):
+            self.lua('vim.o.cmdheight=' + str(height))
+            self.pump(.05)
+        self.assertEqual(int(self.lua('print(_G.typography_erases)')), 0)
+        self.lua("_G.foreign_buf=vim.api.nvim_create_buf(false,true); "
+                 "_G.foreign_win=vim.api.nvim_open_win(_G.foreign_buf,true,"
+                 "{relative='editor',row=10,col=60,width=40,height=7,style='minimal',border='single'})")
+        for i in range(4):
+            self.lua("vim.api.nvim_buf_set_lines(_G.foreign_buf,0,-1,false,{'filter " + str(i) + "'}); "
+                     "require('inkstone.core.typography').clear(_G.foreign_buf); vim.cmd('redraw')")
+            self.pump(.05)
+            self.assertTrue(any((cell.get('mcd') or {}).get('scale') == 2
+                                for row in range(24) for cell in self.screen.cpu_cells(row)), self.visible_text())
+        self.assertEqual(int(self.lua('print(_G.typography_erases)')), 0)
+        self.lua('vim.api.nvim_win_close(_G.foreign_win,true)')
+        self.pump()
+        self.assert_source()
+
+    def test_float_overlap_hides_only_the_covered_heading(self):
+        self.tmux('set-option', '-g', 'allow-passthrough', 'on')
+        self.render(['BEFORE', '', '# TOP', '', 'one', 'two', 'three', '', '# LOWER', '', 'AFTER'])
+        self.lua("vim.env.KITTY_WINDOW_ID='1'; require('inkstone.api').render({buf=vim.api.nvim_get_current_buf()}); vim.wait(150)")
+        self.pump(.3)
+        self.lua("_G.cover_buf=vim.api.nvim_create_buf(false,true); "
+                 "_G.cover_win=vim.api.nvim_open_win(_G.cover_buf,true,"
+                 "{relative='editor',row=1,col=0,width=35,height=4,style='minimal',border='single'})")
+        for i in range(3):
+            self.lua("vim.api.nvim_buf_set_lines(_G.cover_buf,0,-1,false,{'popup " + str(i) + "'}); vim.cmd('redraw')")
+            self.pump(.08)
+            text = [cell['text'] for row in range(24) for cell in self.screen.cpu_cells(row)
+                    if cell.get('mcd') and cell['x'] == 0 and cell['y'] == 0]
+            self.assertNotIn('TOP', text)
+            self.assertIn('LOWER', text)
+        self.lua('vim.api.nvim_win_close(_G.cover_win,true)')
+        self.pump(.3)
+        self.assert_source()
+
+    def test_fzf_filter_keeps_unrelated_heading_intact(self):
+        if not shutil.which('fzf'):
+            self.skipTest('fzf is not installed')
+        self.tmux('set-option', '-g', 'allow-passthrough', 'on')
+        self.render(['BEFORE', '', '# Heading', '', 'BODY', '', 'AFTER'])
+        self.lua("vim.env.KITTY_WINDOW_ID='1'; require('inkstone.api').render({buf=vim.api.nvim_get_current_buf()}); vim.wait(150)")
+        self.pump(.3)
+        command = "printf 'alpha\\nbravo\\nalphabet\\ncharlie\\n' | fzf --sync --no-info --no-mouse --layout=reverse"
+        self.lua("local t=require('inkstone.core.typography'); local erase=t.erase; _G.typography_erases=0; "
+                 "t.erase=function(...) _G.typography_erases=_G.typography_erases+1; return erase(...) end; "
+                 "_G.fzf_buf=vim.api.nvim_create_buf(false,true); "
+                 "_G.fzf_win=vim.api.nvim_open_win(_G.fzf_buf,true,"
+                 "{relative='editor',row=10,col=60,width=40,height=7,style='minimal',border='single'}); "
+                 "_G.fzf_job=vim.fn.jobstart({'sh','-c'," + json.dumps(command) + "},{term=true})")
+        self.pump(.2)
+        for text in ('a', 'l', 'p', 'h'):
+            self.lua('vim.api.nvim_chan_send(_G.fzf_job,' + json.dumps(text) + ')')
+            self.pump(.08)
+            self.assertTrue(any((cell.get('mcd') or {}).get('scale') == 2
+                                for row in range(24) for cell in self.screen.cpu_cells(row)), self.visible_text())
+        self.assertEqual(int(self.lua('print(vim.fn.jobwait({_G.fzf_job},0)[1])')), -1)
+        self.assertEqual(int(self.lua('print(_G.typography_erases)')), 0)
+        self.assertIn('alpha', self.lua('print(vim.json.encode(vim.api.nvim_buf_get_lines(_G.fzf_buf,0,-1,false)))'))
+        self.lua('vim.fn.jobstop(_G.fzf_job); vim.api.nvim_win_close(_G.fzf_win,true)')
+        self.pump()
+        self.assert_source()
+
+    def test_overlay_replay_is_local_and_does_not_clear_unchanged_glyphs(self):
+        self.tmux('set-option', '-g', 'allow-passthrough', 'on')
+        self.render(['BEFORE', '', '# FIRST', '', '# SECOND', '', 'AFTER'])
+        self.lua("vim.env.KITTY_WINDOW_ID='1'; require('inkstone.api').render({buf=vim.api.nvim_get_current_buf()}); vim.wait(150)")
+        self.pump(.3)
+        result = json.loads(self.lua("local t=require('inkstone.core.typography'); local send=vim.api.nvim_ui_send; "
+                 "local packets={}; vim.api.nvim_ui_send=function(s) packets[#packets+1]=s end; "
+                 "t.damaged={}; t.paint(false); local unchanged=#packets; "
+                 "t.damaged[t.drawn[1].key]=true; t.paint(false); local single=table.concat(packets); "
+                 "packets={}; t.paint(true); local recovery=table.concat(packets); vim.api.nvim_ui_send=send; "
+                 "print(vim.json.encode({unchanged=unchanged,single=single,recovery=recovery}))"))
+        self.assertEqual(result['unchanged'], 0)
+        self.assertIn('FIRST', result['single'])
+        self.assertNotIn('SECOND', result['single'])
+        self.assertIn('FIRST', result['recovery'])
+        self.assertIn('SECOND', result['recovery'])
+        self.assertNotIn('X', result['recovery'])
+        self.assert_source()
+
     def test_fragmented_version_reply_never_becomes_mapped_input(self):
         self.tmux('set-option', '-g', 'allow-passthrough', 'on')
         self.lua("vim.env.KITTY_WINDOW_ID=nil; vim.env.TERM_PROGRAM=nil")

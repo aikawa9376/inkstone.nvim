@@ -158,15 +158,21 @@ does not cancel the reply drain because an already sent query cannot be recalled
 
 The overlay bypasses tmux using standard passthrough after reading its pane
 coordinates, status placement and allow-passthrough option. It never patches
-or configures tmux. A decoration provider tracks affected source rows and
-window geometry instead of erasing on every redraw. Cursor-only updates retain
-unchanged overlays. Changed geometry/content/entry sets erase old extents before
-native redraw; dirty rows repaint after the flush in one clear/draw packet.
-The scheduled painter skips identical frames unless damage/recovery forces it.
-A scoped 250ms timer
-recovers foreign repaint damage. Size-only changes also clear the previous
-multicell extent in the same output packet, even if grid extmarks were reused.
-Float/popup bounds and active tabs are checked
+or configures tmux. Each drawn line retains its buffer/window/entry ownership,
+native and tmux-adjusted bounds, and output payload. Native damage marks that
+line for replay; the painter compares lines independently, so a redraw in one
+place does not clear or resend every heading. Clearing an unrelated buffer is
+a no-op for placements. Changed geometry/content/entry sets erase only owned
+extents before native redraw. Command-line height changes preserve still-visible
+lines when their origin and width are unchanged. Floats and popup menus erase
+only intersecting lines before they draw, never the rest of the page.
+
+A scoped 250ms timer recovers foreign repaint damage by reissuing identical
+multicells without a preceding glyph erase. Ordinary dirty-line replays use
+the same approach; only obsolete extents and trailing unscaled fallback cells
+need explicit clearing. This avoids blank intermediate rows during command-line
+typing, floating terminal updates and recovery. Size-only changes still clear
+the previous extent even when grid extmarks were reused. Float/popup bounds and active tabs are checked
 before drawing; cursor source restoration follows anti-conceal. Terminal geometry
 refreshes retain request waiters until the fallback frame is rebuilt. Setup,
 disable and wipe release owned placement timers and request waiters; a pending

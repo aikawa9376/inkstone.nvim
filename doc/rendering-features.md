@@ -206,11 +206,12 @@ gaps in ordinary words; a final short chunk can retain trailing padding.
 Stock tmux works with `set -g allow-passthrough on`. Inkstone reads the pane
 offset and top status-bar height and uses standard passthrough; it does not
 patch tmux or change its options. Cursor-only redraws leave unaffected overlays
-in place. The decoration provider tracks geometry and damaged source rows;
-redrawn text is cleared/repainted in one output packet, with a 250ms recovery
-tick while placements exist. Layout/content changes erase obsolete extents
-before rebuilding the native grid. Floating windows and popup menus take
-precedence. Cursor entry restores source only when anti-conceal is enabled;
+in place. Damage is tracked per displayed line and placement ownership:
+command input and non-overlapping floating terminals (including fzf) do not
+erase other headings. Floating windows and popup menus take precedence only
+where they overlap. Dirty-line and 250ms recovery replays reissue unchanged
+glyphs without first blanking them. Layout/content changes clear obsolete
+owned extents before rebuilding the grid. Cursor entry restores source only when anti-conceal is enabled;
 disable/setup/wipe stop owned placement timers. This is a terminal text overlay,
 so an unrelated repaint can briefly show normal text before recovery. The
 terminal tests cover multicell size metadata, tmux refresh, pane offsets, source

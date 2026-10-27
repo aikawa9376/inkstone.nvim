@@ -81,13 +81,14 @@ function M.retry()
     M.capability, M.tmux = nil, nil
 end
 
-function M.erase()
-    local out = {}
+function M.erase(matches)
+    local out, retained = {}, {}
     for _, rect in ipairs(M.drawn) do
-        out[#out + 1] = ('\27[%d;%dH\27[%dX'):format(rect.row, rect.col, rect.width)
+        if not matches or matches(rect) then
+            out[#out + 1] = ('\27[%d;%dH\27[%dX'):format(rect.row, rect.col, rect.width)
+        else retained[#retained + 1] = rect end
     end
-    M.drawn = {}
-    M.frame = nil
+    M.drawn = retained
     if #out > 0 then send('\27' .. '7' .. table.concat(out) .. '\27' .. '8') end
 end
 
@@ -296,17 +297,46 @@ local function colors(highlight, fallback)
     return table.concat(out)
 end
 
-local function covered(win, row, col, height, width)
-    if vim.fn.pumvisible() == 1 then return true end
+local function overlaps(a, b)
+    return a.row < b.row + b.height and a.row + a.height > b.row
+        and a.col < b.col + b.width and a.col + a.width > b.col
+end
+
+local function float_rect(win)
+    local pos = vim.api.nvim_win_get_position(win)
+    return { win = win, row = pos[1], col = pos[2],
+        height = vim.api.nvim_win_get_height(win) + 2, width = vim.api.nvim_win_get_width(win) + 2 }
+end
+
+local function blockers()
+    local result = {}
+    if vim.fn.pumvisible() == 1 then
+        local p = vim.fn.pum_getpos()
+        if p.row then result[#result + 1] = { row = p.row, col = p.col, height = p.height + 2, width = p.width + 2 } end
+    end
     for _, other in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
         local cfg = vim.api.nvim_win_get_config(other)
-        if other ~= win and cfg.relative ~= '' and not cfg.hide then
-            local pos = vim.api.nvim_win_get_position(other)
-            if row <= pos[1] + vim.api.nvim_win_get_height(other) + 2 and row + height > pos[1]
-                and col <= pos[2] + vim.api.nvim_win_get_width(other) + 2 and col + width > pos[2] then return true end
-        end
+        if cfg.relative ~= '' and not cfg.hide then result[#result + 1] = float_rect(other) end
+    end
+    return result
+end
+
+local function covered(rect, covers)
+    local screen = { row = rect.screen_row, col = rect.screen_col, height = rect.height, width = rect.width }
+    for _, cover in ipairs(covers) do
+        if cover.win ~= rect.win and overlaps(screen, cover) then return true end
     end
     return false
+end
+
+local function erase_matches(matches)
+    for _, rect in ipairs(M.drawn) do
+        if matches(rect) then M.erase(matches); return end
+    end
+end
+
+local function erase_covered(covers)
+    erase_matches(function(rect) return covered(rect, covers) end)
 end
 
 local function window_geometry(win, info, top)
@@ -317,13 +347,8 @@ end
 function M.paint(force)
     if M.painting or not M.tmux or not M.tmux.allowed or M.capability ~= true then return end
     M.painting = true
-    local out, regions = {}, {}
-    -- A size/color update can reuse identical grid extmarks and therefore
-    -- produce no native redraw. Clear the previous extent in the same packet
-    -- before drawing a narrower run, so old multicell tails cannot survive.
-    for _, rect in ipairs(M.drawn) do
-        out[#out + 1] = ('\27[%d;%dH\27[%dX'):format(rect.row, rect.col, rect.width)
-    end
+    local out, regions, wanted, previous, covers = {}, {}, {}, {}, blockers()
+    for _, rect in ipairs(M.drawn) do previous[rect.key] = rect end
     for buf, state in pairs(M.active) do
         if vim.api.nvim_buf_is_valid(buf) and vim.api.nvim_buf_get_changedtick(buf) == state.tick
             and vim.api.nvim_win_is_valid(state.win) and vim.api.nvim_win_get_buf(state.win) == buf
@@ -340,32 +365,53 @@ function M.paint(force)
                 for i, line in ipairs(entry.lines) do
                     local row, col = pos.row + (i - 1) * entry.spec.scale, pos.col
                     local width = math.max(line.width, entry.erase_width or 0)
+                    local rect = { key = buf .. ':' .. entry.id .. ':' .. i, buf = buf, win = win,
+                        screen_row = row, screen_col = col, height = entry.spec.scale, width = width,
+                        row = row + M.tmux.top, col = col + M.tmux.left }
                     if pos.row > 0 and row >= top and row + entry.spec.scale - 1 <= bottom
                         and col >= left and col + width - 1 <= right
-                        and not covered(win, row, col, entry.spec.scale, width) then
-                        local at_row, at_col = row + M.tmux.top, col + M.tmux.left
-                        out[#out + 1] = ('\27[%d;%dH\27[%dX'):format(at_row, at_col, width)
-                        regions[#regions + 1] = { row = at_row, col = at_col, width = width }
+                        and not covered(rect, covers) then
+                        local at_row, at_col, payload = rect.row, rect.col, {}
                         for _, run in ipairs(line.runs) do
                             local spec = entry.spec
-                            out[#out + 1] = ('\27[%d;%dH'):format(at_row, at_col)
-                            out[#out + 1] = colors(run.highlight, entry.highlight)
+                            payload[#payload + 1] = ('\27[%d;%dH'):format(at_row, at_col)
+                            payload[#payload + 1] = colors(run.highlight, entry.highlight)
                             local meta = ('s=%d:w=%d'):format(spec.scale, run.cells)
                             if spec.num < spec.den then meta = meta .. (':n=%d:d=%d:v=2'):format(spec.num, spec.den) end
-                            out[#out + 1] = '\27]66;' .. meta .. ';' .. run.text .. '\27\\'
+                            payload[#payload + 1] = '\27]66;' .. meta .. ';' .. run.text .. '\27\\'
                             at_col = at_col + run.width
                         end
+                        -- Clear only the unscaled fallback's trailing cells.
+                        -- Reissuing identical multicells replaces their glyphs
+                        -- atomically; no blank frame or full-line erase is needed.
+                        if width > line.width then
+                            payload[#payload + 1] = ('\27[%d;%dH\27[%dX'):format(at_row, at_col, width - line.width)
+                        end
+                        rect.payload = table.concat(payload)
+                        wanted[rect.key], regions[#regions + 1] = rect, rect
                     end
                 end
             end
         end
     end
-    local frame = table.concat(out)
-    M.drawn = regions
-    if #out > 0 and (force or M.frame ~= frame) then
-        send('\27' .. '7' .. frame .. '\27[0m\27' .. '8')
+    for _, rect in ipairs(M.drawn) do
+        local next_rect = wanted[rect.key]
+        if not next_rect or next_rect.payload ~= rect.payload or next_rect.width ~= rect.width then
+            -- Covered rectangles were already erased before the covering UI
+            -- drew. Never clear over a popup after its native redraw.
+            if not covered(rect, covers) then
+                out[#out + 1] = ('\27[%d;%dH\27[%dX'):format(rect.row, rect.col, rect.width)
+            end
+        end
     end
-    M.frame = frame
+    for _, rect in ipairs(regions) do
+        local old = previous[rect.key]
+        if force or (M.damaged and M.damaged[rect.key]) or not old
+            or old.payload ~= rect.payload or old.width ~= rect.width then out[#out + 1] = rect.payload end
+    end
+    M.drawn = regions
+    M.damaged = {}
+    if #out > 0 then send('\27' .. '7' .. table.concat(out) .. '\27[0m\27' .. '8') end
     M.painting = false
 end
 
@@ -383,18 +429,25 @@ end
 local function start()
     if M.timer then return end
     vim.api.nvim_set_decoration_provider(ns, {
-        on_start = function() M.redrawing = false end,
+        on_start = function() erase_covered(blockers()) end,
         on_win = function(_, win, buf, top)
             local state = M.active[buf]
             if not state or state.win ~= win then
-                if #M.drawn > 0 and vim.api.nvim_win_get_config(win).relative ~= '' then M.erase() end
+                if #M.drawn > 0 and vim.api.nvim_win_get_config(win).relative ~= '' then erase_covered({ float_rect(win) }) end
                 return false
             end
-            local geometry = window_geometry(win, vim.fn.getwininfo(win)[1], top)
+            local info = vim.fn.getwininfo(win)[1]
+            local geometry = window_geometry(win, info, top)
             if not vim.deep_equal(state.geometry, geometry) or vim.api.nvim_buf_get_changedtick(buf) ~= state.tick then
-                M.erase()
+                local old = state.geometry
+                local same_origin = old and old[1] == geometry[1] and vim.deep_equal(old[2], geometry[2])
+                    and old[3] == geometry[3] and old[5] == geometry[5]
+                    and vim.api.nvim_buf_get_changedtick(buf) == state.tick
+                erase_matches(function(rect)
+                    return rect.win == win and (not same_origin or rect.screen_row < info.winrow
+                        or rect.screen_row + rect.height > info.winrow + info.height)
+                end)
                 state.geometry = geometry
-                M.redrawing = true
             end
             return true
         end,
@@ -402,21 +455,26 @@ local function start()
             local state = M.active[buf]
             if state and state.win == win then
                 for _, entry in ipairs(state.entries) do
-                    if row == entry.row then M.redrawing = true; break end
+                    if row == entry.row then
+                        M.damaged = M.damaged or {}
+                        for i = 1, #entry.lines do M.damaged[buf .. ':' .. entry.id .. ':' .. i] = true end
+                    end
                 end
             end
         end,
-        on_end = function() M.schedule(M.redrawing) end,
+        on_end = function() M.schedule() end,
     })
     M.timer = vim.uv.new_timer()
     M.timer:start(250, 250, vim.schedule_wrap(function() M.schedule(true) end))
 end
 
 function M.clear(buf, keep_waiter)
-    local painted = #M.drawn > 0
-    M.erase()
-    if buf then M.active[buf] = nil else M.active = {} end
     if buf and M.waiters and not keep_waiter then M.waiters[buf] = nil elseif not buf then M.waiters = {} end
+    local painted = false
+    for _, rect in ipairs(M.drawn) do if not buf or rect.buf == buf then painted = true; break end end
+    if buf and not M.active[buf] and not painted then return end
+    M.erase(function(rect) return not buf or rect.buf == buf end)
+    if buf then M.active[buf] = nil else M.active = {} end
     -- A pending terminal reply must still drain with its input guard held.
     -- The probe's bounded timer releases it even when no buffers remain.
     if not next(M.active) then
@@ -439,7 +497,9 @@ function M.update(context, extmarks)
     end
     local previous = M.active[context.buf]
     local tick = vim.api.nvim_buf_get_changedtick(context.buf)
-    if previous and (previous.tick ~= tick or not vim.deep_equal(previous.entries, entries)) then M.erase() end
+    if previous and (previous.win ~= context.win or previous.tick ~= tick or not vim.deep_equal(previous.entries, entries)) then
+        M.erase(function(rect) return rect.buf == context.buf end)
+    end
     M.active[context.buf] = { win = context.win, tick = tick, entries = entries,
         geometry = previous and previous.win == context.win and previous.geometry or nil }
     start()
