@@ -332,20 +332,6 @@ function M.filter(context, marks)
     return result
 end
 
-local function colors(highlight, fallback)
-    local result = {}
-    local names = type(highlight) == 'table' and highlight or { highlight or fallback or 'Normal' }
-    for _, name in ipairs(names) do
-        local ok, value = pcall(vim.api.nvim_get_hl, 0, { name = name, link = false })
-        if ok then for k, v in pairs(value) do result[k] = v end end
-    end
-    local out = { '\27[0m' }
-    if result.fg then out[#out + 1] = ('\27[38;2;%d;%d;%dm'):format(math.floor(result.fg / 65536), math.floor(result.fg / 256) % 256, result.fg % 256) end
-    if result.bg then out[#out + 1] = ('\27[48;2;%d;%d;%dm'):format(math.floor(result.bg / 65536), math.floor(result.bg / 256) % 256, result.bg % 256) end
-    if result.bold then out[#out + 1] = '\27[1m' end
-    return table.concat(out)
-end
-
 local function overlaps(a, b)
     return a.row < b.row + b.height and a.row + a.height > b.row
         and a.col < b.col + b.width and a.col + a.width > b.col
@@ -393,20 +379,6 @@ local function window_geometry(win, info, top)
         vim.api.nvim_win_get_width(win), vim.api.nvim_win_get_height(win), info.textoff }
 end
 
--- Keep native cells for diagnostics, not as proof that an overlay survived.
--- Re-emitting identical blank cells can erase terminal multicells without
--- changing anything in Neovim's grid.
-local function native_cells(rect)
-    local cells = {}
-    for row = rect.screen_row, rect.screen_row + rect.height - 1 do
-        for col = rect.screen_col, rect.screen_col + rect.width - 1 do
-            cells[#cells + 1] = vim.fn.screenstring(row, col)
-            cells[#cells + 1] = vim.fn.screenattr(row, col)
-        end
-    end
-    return cells
-end
-
 function M.paint(force)
     if needs_visibility_check() and not M.painting and not background_visible() then return end
     if M.painting or M.suspended or not M.tmux or not M.tmux.allowed
@@ -419,6 +391,7 @@ function M.paint(force)
             and vim.api.nvim_win_is_valid(state.win) and vim.api.nvim_win_get_buf(state.win) == buf
             and vim.api.nvim_win_get_tabpage(state.win) == vim.api.nvim_get_current_tabpage() then
             local win = state.win
+            local colors = require('inkstone.lib.terminal_colors').new(win)
             local info = vim.fn.getwininfo(win)[1]
             -- Native sign/status columns can settle after on_win. Track the
             -- geometry actually used for the overlay, not an earlier grid pass.
@@ -440,7 +413,7 @@ function M.paint(force)
                         for _, run in ipairs(line.runs) do
                             local spec = entry.spec
                             payload[#payload + 1] = ('\27[%d;%dH'):format(at_row, at_col)
-                            payload[#payload + 1] = colors(run.highlight, entry.highlight)
+                            payload[#payload + 1] = colors(run.highlight, entry.highlight, entry.background)
                             local meta = ('s=%d:w=%d'):format(spec.scale, run.cells)
                             if spec.num < spec.den then meta = meta .. (':n=%d:d=%d:v=2'):format(spec.num, spec.den) end
                             payload[#payload + 1] = '\27]66;' .. meta .. ';' .. run.text .. '\27\\'
@@ -472,15 +445,12 @@ function M.paint(force)
     for _, rect in ipairs(regions) do
         local old = previous[rect.key]
         local changed = not old or old.payload ~= rect.payload or old.width ~= rect.width
-        local revisit = changed or (M.damaged and M.damaged[rect.key])
-        rect.native = revisit and native_cells(rect) or old.native
         local recover = force == 'recovery' and M.active[rect.buf].recovery
-        if force == true or recover or revisit then
+        if force == true or recover or changed then
             out[#out + 1] = rect.payload
         end
     end
     M.drawn = regions
-    M.damaged = {}
     if #out > 0 then send('\27' .. '7' .. table.concat(out) .. '\27[0m\27' .. '8') end
     M.painting = false
 end
@@ -515,58 +485,47 @@ sync_recovery = function()
     M.timer:stop()
 end
 
--- auto-cursorline can avoid writing a transient background over a multicell
--- in the first place. Own only flags we change, and leave other suppressors
--- intact. Normal body rows retain the user's delayed cursorline behavior.
+-- Own only flags we change; restore the previous value without taking over
+-- flags already held by another suppressor.
+local function sync_window_flag(name, owners, enabled)
+    local changed, current = false, vim.api.nvim_get_current_win()
+    for win, saved in pairs(owners) do
+        if not vim.api.nvim_win_is_valid(win) then owners[win] = nil
+        elseif not enabled[win] then
+            if vim.w[win][name] == true then
+                vim.w[win][name] = saved.value
+                changed = changed or win == current
+            end
+            owners[win] = nil
+        end
+    end
+    for win in pairs(enabled) do
+        if not owners[win] and vim.w[win][name] ~= true then
+            owners[win] = { value = vim.w[win][name] }
+            vim.w[win][name] = true
+            changed = changed or win == current
+        end
+    end
+    return changed
+end
+
+-- Ordinary body rows retain the user's delayed cursorline behavior.
 function M.sync_cursorline()
-    local blocked, rendered, changed = {}, {}, false
-    local current = vim.api.nvim_get_current_win()
+    local blocked, rendered = {}, {}
     for buf, state in pairs(M.active) do
         local win = state.win
         if vim.api.nvim_win_is_valid(win) and vim.api.nvim_win_get_buf(win) == buf then
-            rendered[win] = #state.entries > 0
+            if #state.entries > 0 then rendered[win] = true end
             local row = vim.api.nvim_win_get_cursor(win)[1] - 1
             for _, entry in ipairs(state.entries) do
                 if row >= entry.range[1] and row <= entry.range[2] then blocked[win] = true; break end
             end
         end
     end
-    for win, saved in pairs(cursorline_windows) do
-        if not vim.api.nvim_win_is_valid(win) then cursorline_windows[win] = nil
-        elseif not blocked[win] then
-            if vim.w[win].auto_cursorline_disabled == true then
-                vim.w[win].auto_cursorline_disabled = saved.value
-                changed = changed or win == current
-            end
-            cursorline_windows[win] = nil
-        end
-    end
-    for win in pairs(blocked) do
-        if not cursorline_windows[win] and vim.w[win].auto_cursorline_disabled ~= true then
-            cursorline_windows[win] = { value = vim.w[win].auto_cursorline_disabled }
-            vim.w[win].auto_cursorline_disabled = true
-            changed = changed or win == current
-        end
-    end
-    for win, saved in pairs(cursorline_extmark_windows) do
-        if not vim.api.nvim_win_is_valid(win) then cursorline_extmark_windows[win] = nil
-        elseif not rendered[win] then
-            if vim.w[win].auto_cursorline_extmark == true then
-                vim.w[win].auto_cursorline_extmark = saved.value
-                changed = changed or win == current
-            end
-            cursorline_extmark_windows[win] = nil
-        end
-    end
-    for win, enabled in pairs(rendered) do
-        if enabled and not cursorline_extmark_windows[win] and vim.w[win].auto_cursorline_extmark ~= true then
-            cursorline_extmark_windows[win] = { value = vim.w[win].auto_cursorline_extmark }
-            vim.w[win].auto_cursorline_extmark = true
-            changed = changed or win == current
-        end
-    end
+    local blocked_changed = sync_window_flag('auto_cursorline_disabled', cursorline_windows, blocked)
+    local rendered_changed = sync_window_flag('auto_cursorline_extmark', cursorline_extmark_windows, rendered)
     local auto = package.loaded.auto_cursorline
-    if changed and type(auto) == 'table' and type(auto.cursor_moved) == 'function' then auto.cursor_moved() end
+    if (blocked_changed or rendered_changed) and type(auto) == 'table' and type(auto.cursor_moved) == 'function' then auto.cursor_moved() end
 end
 
 local function start()
@@ -602,17 +561,6 @@ local function start()
                 state.geometry = geometry
             end
             return true
-        end,
-        on_line = function(_, win, buf, row)
-            local state = M.active[buf]
-            if state and state.win == win then
-                for _, entry in ipairs(state.entries) do
-                    if row == entry.row then
-                        M.damaged = M.damaged or {}
-                        for i = 1, #entry.lines do M.damaged[buf .. ':' .. entry.id .. ':' .. i] = true end
-                    end
-                end
-            end
         end,
         -- TUI/compositor output can overwrite multicells even when no owned
         -- source row received on_line, or when its blank cells stayed equal.

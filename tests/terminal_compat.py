@@ -303,6 +303,38 @@ class TerminalTests(unittest.TestCase):
         self.assertIn('│', self.visible_text())
         self.assert_source()
 
+    def test_sized_text_preserves_theme_colors_backgrounds_and_inline_styles(self):
+        self.tmux('set-option', '-g', 'allow-passthrough', 'on')
+        self.render(['BEFORE', '', '# HEAD *ITALIC* [LINK](https://example.org)', '', 'AFTER'])
+        self.lua("vim.env.KITTY_WINDOW_ID='1'; require('inkstone.core.colors').init(); "
+                 "vim.api.nvim_set_hl(0,'@markup.heading.1.markdown',{fg=0x112233,bold=true}); "
+                 "vim.api.nvim_set_hl(0,'InkstoneH1Bg',{bg=0x223344}); "
+                 "vim.api.nvim_set_hl(0,'@markup.italic.markdown_inline',{italic=true}); "
+                 "vim.api.nvim_set_hl(0,'InkstoneLink',{fg=0x445566,underline=true}); "
+                 "vim.api.nvim_set_hl(0,'@markup.link.label.markdown_inline',{link='InkstoneLink'}); "
+                 "require('inkstone.api').render({buf=vim.api.nvim_get_current_buf()}); vim.wait(150)")
+        self.pump(.2)
+
+        def style(text):
+            for row in range(24):
+                for col, cell in enumerate(self.screen.cpu_cells(row)):
+                    if cell.get('mcd') and cell['x'] == 0 and cell['y'] == 0 and text in cell['text']:
+                        return self.screen.line(row).cursor_from(col)
+            self.fail('Missing sized text: ' + text)
+
+        head = style('HEAD')
+        self.assertEqual(head.fg, (0x112233 << 8) | 2)
+        self.assertEqual(head.bg, (0x223344 << 8) | 2)
+        self.assertTrue(head.bold)
+        self.assertTrue(style('ITALIC').italic)
+        link = style('LINK')
+        self.assertEqual(link.fg, (0x445566 << 8) | 2)
+        self.assertEqual(link.decoration, 1)
+        self.lua("vim.api.nvim_set_hl(0,'@markup.heading.1.markdown',{fg=0x665544}); vim.cmd('redraw!')")
+        self.pump(.2)
+        self.assertEqual(style('HEAD').fg, (0x665544 << 8) | 2)
+        self.assert_source()
+
     def test_kitty_font_sizes_repaint_and_cursor_restore(self):
         self.tmux('set-option', '-g', 'allow-passthrough', 'on')
         self.render(['BEFORE', '', '# Large 日本語', '', 'Normal <small>Small</small> after', '', 'AFTER'])
@@ -474,23 +506,17 @@ class TerminalTests(unittest.TestCase):
         self.pump()
         self.assert_source()
 
-    def test_overlay_replay_is_local_and_does_not_clear_unchanged_glyphs(self):
+    def test_unchanged_replay_does_not_clear_glyphs(self):
         self.tmux('set-option', '-g', 'allow-passthrough', 'on')
         self.render(['BEFORE', '', '# FIRST', '', '# SECOND', '', 'AFTER'])
         self.lua("vim.env.KITTY_WINDOW_ID='1'; require('inkstone.api').render({buf=vim.api.nvim_get_current_buf()}); vim.wait(150)")
         self.pump(.3)
         result = json.loads(self.lua("local t=require('inkstone.core.typography'); local send=vim.api.nvim_ui_send; "
                  "local packets={}; vim.api.nvim_ui_send=function(s) packets[#packets+1]=s end; "
-                 "t.damaged={}; t.paint(false); local unchanged=#packets; "
-                 "vim.api.nvim_buf_set_extmark(0,vim.api.nvim_create_namespace('TypographyDamage'),2,0,"
-                 "{virt_text={{'!','ErrorMsg'}},virt_text_win_col=0,priority=10000}); "
-                 "vim.cmd('redraw!'); t.damaged={[t.drawn[1].key]=true}; "
-                 "t.paint(false); local single=table.concat(packets); "
-                 "packets={}; t.paint(true); local recovery=table.concat(packets); vim.api.nvim_ui_send=send; "
-                 "print(vim.json.encode({unchanged=unchanged,single=single,recovery=recovery}))"))
+                 "t.paint(false); local unchanged=#packets; "
+                 "t.paint(true); local recovery=table.concat(packets); vim.api.nvim_ui_send=send; "
+                 "print(vim.json.encode({unchanged=unchanged,recovery=recovery}))"))
         self.assertEqual(result['unchanged'], 0)
-        self.assertIn('FIRST', result['single'])
-        self.assertNotIn('SECOND', result['single'])
         self.assertIn('FIRST', result['recovery'])
         self.assertIn('SECOND', result['recovery'])
         self.assertNotIn('X', result['recovery'])
@@ -580,15 +606,14 @@ class TerminalTests(unittest.TestCase):
 
         label = self.lua('print(_G.repair_label)')
         self.assertNotIn(label, scaled_text(), 'native repaint must actually overwrite the overlay')
-        self.lua("local t=require('inkstone.core.typography'); local r=t.drawn[1]; "
-                 "t.damaged={[r.key]=true}; t.schedule()")
+        self.lua("require('inkstone.core.typography').schedule(true)")
         self.pump(.15)
         self.assertIn(label, scaled_text(), 'a same-cell redraw must recover without cursor input or a timer')
         self.lua("local t=require('inkstone.core.typography'); local r=t.drawn[1]; "
                  "vim.api.nvim_ui_send(t.wrap(('\\27'..'7\\27[%d;%dH\\27[%dX\\27'..'8'):format(r.row,r.col,r.width)))")
         self.pump(.1)
         self.assertNotIn(label, scaled_text())
-        self.lua("require('inkstone.core.typography').damaged={}; vim.cmd('redraw')")
+        self.lua("vim.cmd('redraw')")
         self.pump(.15)
         self.assertIn(label, scaled_text(), 'a completed redraw must repair even without explicit source-row damage')
         self.assert_source()
@@ -602,10 +627,14 @@ class TerminalTests(unittest.TestCase):
                  "vim.api.nvim_win_set_cursor(0,{5,0}); vim.wo.cursorline=false; "
                  "require('inkstone.api').render({buf=vim.api.nvim_get_current_buf()}); vim.wait(200)")
         self.pump(.2)
-        rectangles = json.loads(self.lua("print(vim.json.encode(require('inkstone.core.typography').drawn))"))
+        rectangles = json.loads(self.lua("local rectangles=vim.deepcopy(require('inkstone.core.typography').drawn); "
+                 "for _,r in ipairs(rectangles) do r.native={}; "
+                 "for row=r.screen_row,r.screen_row+r.height-1 do for col=r.screen_col,r.screen_col+r.width-1 do "
+                 "r.native[#r.native+1]=vim.fn.screenstring(row,col) end end end; "
+                 "print(vim.json.encode(rectangles))"))
         self.assertEqual(len(rectangles), 4)
         for rect in rectangles:
-            self.assertTrue(all(not cell.strip() for cell in rect['native'][::2]), rect['key'])
+            self.assertTrue(all(not cell.strip() for cell in rect['native']), rect['key'])
         normal_copies = []
         frames = []
 

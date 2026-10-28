@@ -310,6 +310,49 @@ return function(test, equal, buffer)
         vim.api.nvim_buf_delete(buf, { force = true })
     end)
 
+    test('terminal colors inherit theme backgrounds and linked inline styles without stale caches', function()
+        local colors = require('inkstone.lib.terminal_colors')
+        local win = vim.api.nvim_get_current_win()
+        vim.api.nvim_set_hl(0, 'TypographyBase', { fg = 0x123456, bg = 0x234567 })
+        vim.api.nvim_set_hl(0, 'TypographyBackground', { fg = 0xffffff, bg = 0x345678, bold = true })
+        vim.api.nvim_set_hl(0, 'TypographyInline', { fg = 0xabcdef, italic = true, undercurl = true, sp = 0x456789 })
+        vim.api.nvim_set_hl(0, 'TypographyLink', { link = 'TypographyInline' })
+        local saved = vim.wo[win].winhighlight
+        vim.wo[win].winhighlight = 'Normal:TypographyBase'
+        local resolve = colors.new(win)
+        local plain = resolve({ 'InkstonePadding' }, nil, 'TypographyBackground')
+        assert(plain:find('\27[38;2;18;52;86m', 1, true))
+        assert(plain:find('\27[48;2;52;86;120m', 1, true))
+        assert(plain:find('\27[1m', 1, true))
+        local styled = resolve({ 'TypographyLink' })
+        for _, sequence in ipairs({ '\27[38;2;171;205;239m', '\27[3m', '\27[4:3m', '\27[58;2;69;103;137m' }) do
+            assert(styled:find(sequence, 1, true), vim.inspect(styled))
+        end
+        local original, calls = vim.api.nvim_get_hl, 0
+        vim.api.nvim_get_hl = function(...) calls = calls + 1; return original(...) end
+        for _ = 1, 20 do equal(resolve({ 'TypographyLink' }), styled) end
+        vim.api.nvim_get_hl = original
+        equal(calls, 0)
+        vim.api.nvim_set_hl(0, 'TypographyInline', { fg = 0x654321 })
+        assert(colors.new(win)({ 'TypographyLink' }):find('\27[38;2;101;67;33m', 1, true))
+        vim.wo[win].winhighlight = saved
+    end)
+
+    test('terminal colors honor a window highlight namespace and global fallbacks', function()
+        local colors = require('inkstone.lib.terminal_colors')
+        local win = vim.api.nvim_get_current_win()
+        local ns, saved = vim.api.nvim_create_namespace('TypographyTheme'), vim.api.nvim_get_hl_ns({ winid = win })
+        vim.api.nvim_set_hl(0, 'TypographyGlobal', { italic = true })
+        vim.api.nvim_set_hl(ns, 'Normal', { fg = 0x123456, bg = 0x234567 })
+        vim.api.nvim_set_hl(ns, 'TypographyLocal', { fg = 0x345678, bold = true })
+        vim.api.nvim_win_set_hl_ns(win, ns)
+        local value = colors.new(win)({ 'TypographyLocal', 'TypographyGlobal' })
+        for _, sequence in ipairs({ '\27[38;2;52;86;120m', '\27[48;2;35;69;103m', '\27[1m', '\27[3m' }) do
+            assert(value:find(sequence, 1, true), vim.inspect(value))
+        end
+        vim.api.nvim_win_set_hl_ns(win, saved)
+    end)
+
     test('fractional typography does not round space into the middle of words', function()
         local typography = require('inkstone.core.typography')
         local text = 'Images and diagrams and formatting'

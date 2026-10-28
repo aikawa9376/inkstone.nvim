@@ -208,10 +208,16 @@ a duplicate normal-size title or small span. This prevents ordinary redraws
 from exposing an unscaled copy without Markdown markers. The source buffer
 and the normal renderer used when typography is disabled remain intact.
 
+Sized text inherits the theme's text/background colors and inline styles,
+including bold, italic, underline/undercurl and strikethrough. Heading color
+groups and window-local highlights are respected; theme or highlight changes
+apply on the next redraw. This follows the renderer's named highlight groups,
+not arbitrary decorations applied by other plugins to individual screen cells.
+
 Stock tmux works with `set -g allow-passthrough on`. Inkstone reads the pane
 offset and top status-bar height and uses standard passthrough; it does not
 patch tmux or change its options. Cursor-only redraws leave unaffected overlays
-in place. Damage is tracked per displayed line and placement ownership:
+in place. Placement ownership is tracked per displayed line:
 command input and non-overlapping floating terminals (including fzf) do not
 erase other headings. Floating windows and popup menus take precedence only
 where they overlap. At the end of each Neovim redraw, visible sized text is

@@ -167,9 +167,9 @@ does not cancel the reply drain because an already sent query cannot be recalled
 The overlay bypasses tmux using standard passthrough after reading its pane
 coordinates, status placement and allow-passthrough option. It never patches
 or configures tmux. Each drawn line retains its buffer/window/entry ownership,
-native and tmux-adjusted bounds, and output payload. Native damage marks that
-line for replay; the painter compares placement ownership independently, so a
-redraw in one place does not erase every heading. Clearing an unrelated buffer is
+native and tmux-adjusted bounds, and output payload. The painter compares
+placement ownership independently, so a redraw in one place does not erase
+every heading. Clearing an unrelated buffer is
 a no-op for placements. Changed geometry/content/entry sets erase only owned
 extents before native redraw. Command-line height changes preserve still-visible
 lines when their origin and width are unchanged. Floats and popup menus erase
@@ -178,8 +178,10 @@ Every completed Neovim redraw schedules one coalesced replay of visible,
 uncovered placements after the native grid flush. Native output can overwrite
 multicells with identical blank cells, including composed/virtual rows without
 an owned source-row callback. Equal screenstring/screenattr snapshots therefore
-cannot prove the terminal overlay survived. Snapshots remain diagnostic only;
-explicit dirty placements replay even when their native cells are identical.
+cannot prove the terminal overlay survived. Production painting keeps neither
+cell snapshots nor per-source-row damage keys: both add work without allowing
+any redraw repair to be skipped. Tests read the native grid directly when
+verifying blank reservations. Explicit recovery uses `schedule(true)`.
 Idle typography does not replay text by default, including fractional
 H2/H3 sizes. Periodic replays are observable output even without explicit erases;
 final multicell metadata alone does not establish that intermediate GPU frames
@@ -222,12 +224,12 @@ Erasing an obsolete placement only in a scheduled paint is too late: its old
 coordinates can already contain another buffer's text. Ordinary focus changes
 between still-visible windows retain the source window's owned placement.
 
-Native dirty-line replays reissue multicells without a preceding glyph erase;
+Redraw replays reissue multicells without a preceding glyph erase;
 only obsolete extents and trailing reserved cells need explicit clearing.
 An external tmux refresh can overwrite passthrough text without a Neovim event.
 `:Inkstone refresh` explicitly rebuilds the current view and forces overlay replay.
 `typography.recovery=true` opts a buffer into the former 250ms foreign-repaint
-recovery loop. Its unchanged replays use cached snapshots and target only opted-in
+recovery loop. Its unchanged replays target only opted-in
 buffers. The timer runs only while at least one such buffer is visible, and
 stops when the last one is hidden/cleared. It is off by default to avoid periodic
 output and fractional-text flicker. Size-only changes still clear
@@ -236,6 +238,19 @@ before drawing; cursor source restoration follows anti-conceal. Terminal geometr
 refreshes retain request waiters until the fallback frame is rebuilt. Setup,
 disable and wipe release owned placement timers and request waiters; a pending
 probe retains its bounded timer and input guard until reply or timeout.
+
+`lib/terminal_colors.lua` resolves highlight stacks for each window/paint.
+Normal/NormalNC supply the base; configured heading foreground/background
+groups supply defaults, and inline groups retain their ordered overrides.
+Background groups contribute background and style attributes rather than
+replacing the foreground. Window highlight namespaces and winhighlight links
+resolve with global fallbacks, including namespace links to globally defined
+groups. RGB foreground/background/special colors, bold, italic, reverse,
+strikethrough and underline variants become SGR attributes before OSC 66 text.
+Named definitions and completed SGR sequences are cached only within that
+paint, so direct highlight edits and theme changes take effect on the next
+redraw without stale global caches. This reproduces named renderer highlights;
+arbitrary third-party per-cell decorations are not sampled from the grid.
 
 The source bytes and normal grid remain authoritative. This is a scoped
 terminal overlay, not a replacement Neovim TUI, and brief fallback/flicker during
