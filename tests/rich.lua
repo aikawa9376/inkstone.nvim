@@ -268,13 +268,16 @@ return function(test, equal, buffer)
         local buf = buffer({ 'heading', 'body' })
         local win = vim.api.nvim_get_current_win()
         local previous = vim.w[win].auto_cursorline_disabled
+        local previous_extmark = vim.w[win].auto_cursorline_extmark
         typography.active[buf] = { win = win, entries = { { range = { 0, 0 } } } }
         vim.api.nvim_win_set_cursor(win, { 1, 0 })
         typography.sync_cursorline()
         equal(vim.w[win].auto_cursorline_disabled, true)
+        equal(vim.w[win].auto_cursorline_extmark, true)
         vim.api.nvim_win_set_cursor(win, { 2, 0 })
         typography.sync_cursorline()
         equal(vim.w[win].auto_cursorline_disabled, previous)
+        equal(vim.w[win].auto_cursorline_extmark, true)
         vim.w[win].auto_cursorline_disabled = true
         vim.api.nvim_win_set_cursor(win, { 1, 0 })
         typography.sync_cursorline()
@@ -286,7 +289,14 @@ return function(test, equal, buffer)
         typography.sync_cursorline()
         typography.clear(buf)
         equal(vim.w[win].auto_cursorline_disabled, false)
+        equal(vim.w[win].auto_cursorline_extmark, previous_extmark)
+        vim.w[win].auto_cursorline_extmark = true
+        typography.active[buf] = { win = win, entries = { { range = { 0, 0 } } } }
+        typography.sync_cursorline()
+        typography.clear(buf)
+        equal(vim.w[win].auto_cursorline_extmark, true)
         vim.w[win].auto_cursorline_disabled = previous
+        vim.w[win].auto_cursorline_extmark = previous_extmark
         vim.api.nvim_buf_delete(buf, { force = true })
     end)
 

@@ -86,7 +86,10 @@ doc/rendering-features.md for examples and limits.
 See doc/rendering-features.md for all options and graphics ownership with Snacks.
 For auto-cursorline.nvim integration, update both plugins. Cursorline is
 temporarily suppressed on shown typography rows; body/source rows retain its
-normal delayed behavior. Global options and other suppression owners are preserved.
+normal delayed behavior through window-scoped row highlights. This avoids native
+cursorline option redraws while typography is shown. Explicit screenline mode
+keeps native wrap semantics. Buffer/tab changes and window closing clear old
+placements before the new view draws. Other suppression owners are preserved.
 
 LATEX
 Install utftex or latex2text (Arch: python-pylatexenc). Markdown formula ranges

@@ -183,6 +183,21 @@ active highlights and queued enable timers honor suppression. Source restored
 by anti-conceal retains normal cursorline behavior. No plugin is loaded just
 for this integration and no global cursorline setting is changed.
 
+Windows with typography also temporarily own `w:auto_cursorline_extmark`.
+Updated auto-cursorline uses a window-scoped current-row mark for the delayed
+CursorLine/CursorLineNr highlight, keeping the native `cursorline` option off.
+Changing that native option can commit a fallback-text frame before scheduled
+overlay repair; dirty-line tracking alone cannot remove that gap. The row mark
+changes only the affected source row. Leaving typography restores the previous
+flag and auto-cursorline's native behavior. Explicit `screenline` cursorlineopt
+retains native behavior, since a whole-source-row mark has different wrap semantics.
+
+Retire placements on BufWinLeave, TabLeave and WinClosed before another view
+draws. The provider also prunes invalid owners before native drawing starts.
+Erasing an obsolete placement only in a scheduled paint is too late: its old
+coordinates can already contain another buffer's text. Ordinary focus changes
+between still-visible windows retain the source window's owned placement.
+
 Native dirty-line replays reissue multicells without a preceding glyph erase;
 only obsolete extents and trailing unscaled fallback cells need explicit clearing.
 An external tmux refresh can overwrite passthrough text without a Neovim event.

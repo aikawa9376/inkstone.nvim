@@ -87,10 +87,18 @@ class TerminalTests(unittest.TestCase):
                     os.write(self.fd, b'\x1b\\')
                 else:
                     os.write(self.fd, response + b'\x1b\\')
-            while data:
-                used = self.screen.test_commit_write_buffer(data, self.screen.test_create_write_buffer())
-                self.screen.test_parse_written_data()
-                data = data[used:]
+            observer = getattr(self, 'frame_observer', None)
+            chunks = (bytes((byte,)) for byte in data) if observer else (data,)
+            for part in chunks:
+                chunk = part
+                while chunk:
+                    used = self.screen.test_commit_write_buffer(chunk, self.screen.test_create_write_buffer())
+                    self.screen.test_parse_written_data()
+                    chunk = chunk[used:]
+                if observer:
+                    self.frame_tail = (getattr(self, 'frame_tail', b'') + part)[-8:]
+                    if self.frame_tail.endswith((b'\x1b[?2026l', b'\x1bP=2s\x1b\\')):
+                        observer()
 
     def render(self, lines, cell='trimmed', wrap=False, enabled=True, conceallevel=2, anti_conceal=False):
         self.lines = lines
@@ -495,6 +503,7 @@ class TerminalTests(unittest.TestCase):
         self.tmux('set-option', '-g', 'allow-passthrough', 'on')
         self.render(['BEFORE', '', '# FIRST', '', '## SECOND', '', '### THIRD', '', 'BODY', 'OTHER BODY', '', 'AFTER'])
         self.lua("vim.env.KITTY_WINDOW_ID='1'; vim.api.nvim_set_hl(0,'CursorLine',{bg=0x334455}); "
+                 "require('inkstone.state').get(vim.api.nvim_get_current_buf()).paragraph.wrap=false; "
                  "require('inkstone.api').render({buf=vim.api.nvim_get_current_buf()}); vim.wait(150); "
                  "vim.api.nvim_win_set_cursor(0,{9,0}); vim.wo.cursorline=false; vim.cmd('redraw!')")
         self.pump(.3)
@@ -506,7 +515,11 @@ class TerminalTests(unittest.TestCase):
         for row in (10, 9, 3, 5, 7, 9):
             self.lua('vim.api.nvim_win_set_cursor(0,{' + str(row) + ',0}); require("auto_cursorline").cursor_moved()')
             self.pump(.15)
-            self.assertEqual(self.lua('print(vim.wo.cursorline)'), 'false' if row in (3, 5, 7) else 'true')
+            self.assertEqual(self.lua('print(vim.wo.cursorline)'), 'false')
+            self.assertEqual(self.lua('print(vim.w.auto_cursorline_extmark)'), 'true')
+            if row in (9, 10):
+                self.assertEqual(self.lua("local w=vim.api.nvim_get_current_win(); local a=vim.fn.screenpos(w," + str(row) + ",1); local b=vim.fn.screenpos(w,12,1); "
+                                 "print(vim.fn.screenattr(a.row,a.col)~=vim.fn.screenattr(b.row,b.col))"), 'true')
             self.assertEqual(int(self.lua('print(_G.typography_replays)')), 0)
             text = [cell['text'] for line in range(24) for cell in self.screen.cpu_cells(line)
                     if cell.get('mcd') and cell['x'] == 0 and cell['y'] == 0]
@@ -519,6 +532,7 @@ class TerminalTests(unittest.TestCase):
         self.lua("require('inkstone.api').typography(); vim.wait(50)")
         self.pump(.15)
         self.assertEqual(self.lua('print(vim.w.auto_cursorline_disabled)'), 'nil')
+        self.assertEqual(self.lua('print(vim.w.auto_cursorline_extmark)'), 'nil')
         self.assertEqual(self.lua('print(vim.wo.cursorline)'), 'true')
         self.assert_source()
 
@@ -548,6 +562,66 @@ class TerminalTests(unittest.TestCase):
         for heading in ('FIRST', 'SECOND', 'THIRD'):
             self.assertIn(heading, text)
         self.assert_source()
+
+    def test_cursorline_and_scaled_text_are_present_in_the_same_terminal_frame(self):
+        plugin = Path(os.environ.get('INKSTONE_CURSORLINE_RTP', Path.home() / '.local/share/nvim/lazy/auto-cursorline.nvim'))
+        if not (plugin / 'lua/auto_cursorline/init.lua').is_file():
+            self.skipTest('auto-cursorline.nvim is not installed')
+        self.tmux('set-option', '-g', 'allow-passthrough', 'on')
+        self.render(['BEFORE', '', '# FIRST', '', '## SECOND', '', '### THIRD', '', 'BODY'])
+        self.lua("vim.env.KITTY_WINDOW_ID='1'; vim.api.nvim_set_hl(0,'CursorLine',{bg=0x334455}); "
+                 "require('inkstone.state').get(vim.api.nvim_get_current_buf()).paragraph.wrap=false; "
+                 "vim.api.nvim_win_set_cursor(0,{9,0}); vim.wo.cursorline=false; "
+                 "require('inkstone.api').render({buf=vim.api.nvim_get_current_buf()}); vim.wait(200)")
+        self.pump(.2)
+        self.lua('vim.opt.rtp:prepend(' + json.dumps(str(plugin)) + '); '
+                 "require('auto_cursorline').setup({wait_ms=60}); _G.native_toggles=0; "
+                 "vim.api.nvim_create_autocmd('OptionSet',{pattern='cursorline',callback=function() _G.native_toggles=_G.native_toggles+1 end})")
+        frames = []
+
+        def observe():
+            text = [cell['text'] for row in range(24) for cell in self.screen.cpu_cells(row)
+                    if cell.get('mcd') and cell['x'] == 0 and cell['y'] == 0]
+            frames.append([label for label in ('FIRST', 'SECOND', 'THIRD') if label not in text])
+
+        self.frame_observer = observe
+        for _ in range(2):
+            self.lua("require('auto_cursorline').cursor_moved()")
+            self.pump(.15)
+        self.assertTrue(frames, 'the real terminal must expose synchronized frame boundaries')
+        self.assertTrue(all(not missing for missing in frames), frames)
+        self.assertEqual(self.lua('print(_G.native_toggles)'), '0')
+        self.assertEqual(self.lua('print(vim.wo.cursorline)'), 'false')
+        self.assert_source()
+
+    def test_leaving_rendered_buffer_or_tab_clears_overlays_before_new_text(self):
+        self.tmux('set-option', '-g', 'allow-passthrough', 'on')
+        self.render(['BEFORE', '', '# FIRST', '', '## SECOND', '', 'BODY'])
+        self.lua("vim.env.KITTY_WINDOW_ID='1'; _G.font_buf=vim.api.nvim_get_current_buf(); "
+                 "require('inkstone.api').render({buf=vim.api.nvim_get_current_buf()}); vim.wait(200)")
+        self.pump(.2)
+        for action in ('buffer', 'window', 'tab'):
+            plain = "{'PLAIN BEFORE','','PLAIN AFTER','','PLAIN TAIL'}"
+            if action == 'buffer':
+                self.lua("local buf=vim.api.nvim_create_buf(false,true); vim.api.nvim_buf_set_lines(buf,0,-1,false," + plain + "); "
+                         "vim.api.nvim_win_set_buf(0,buf); vim.cmd('redraw')")
+            elif action == 'window':
+                self.lua("local old=vim.api.nvim_get_current_win(); local buf=vim.api.nvim_create_buf(false,true); "
+                         "vim.api.nvim_buf_set_lines(buf,0,-1,false," + plain + "); vim.cmd('vsplit'); "
+                         "vim.api.nvim_win_set_buf(0,buf); vim.api.nvim_win_close(old,true); vim.cmd('redraw')")
+            else:
+                self.lua("vim.cmd('tabnew'); vim.api.nvim_buf_set_lines(0,0,-1,false," + plain + "); vim.cmd('redraw')")
+            self.pump(.15)
+            text = self.visible_text()
+            self.assertIn('PLAIN AFTER', text)
+            self.assertIn('PLAIN TAIL', text)
+            self.assertFalse(any(cell.get('mcd') for row in range(24) for cell in self.screen.cpu_cells(row)), text)
+            if action in ('buffer', 'window'):
+                self.lua("vim.api.nvim_win_set_buf(0,_G.font_buf); vim.wait(150)")
+            else:
+                self.lua("vim.cmd('tabclose!'); vim.wait(150)")
+            self.pump(.2)
+            self.assert_source()
 
     def test_periodic_typography_recovery_only_replays_opted_in_buffers(self):
         self.tmux('set-option', '-g', 'allow-passthrough', 'on')

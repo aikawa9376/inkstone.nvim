@@ -4,6 +4,7 @@ local M = { active = {}, drawn = {}, tmux = nil, pending = false }
 local ns = vim.api.nvim_create_namespace('inkstone.typography')
 local probe_timeout = 1200
 local cursorline_windows = {}
+local cursorline_extmark_windows = {}
 local function kitty()
     return vim.env.KITTY_WINDOW_ID ~= nil or vim.env.TERM_PROGRAM == 'kitty'
 end
@@ -469,11 +470,12 @@ end
 -- in the first place. Own only flags we change, and leave other suppressors
 -- intact. Normal body rows retain the user's delayed cursorline behavior.
 function M.sync_cursorline()
-    local blocked, changed = {}, false
+    local blocked, rendered, changed = {}, {}, false
     local current = vim.api.nvim_get_current_win()
     for buf, state in pairs(M.active) do
         local win = state.win
         if vim.api.nvim_win_is_valid(win) and vim.api.nvim_win_get_buf(win) == buf then
+            rendered[win] = #state.entries > 0
             local row = vim.api.nvim_win_get_cursor(win)[1] - 1
             for _, entry in ipairs(state.entries) do
                 if row >= entry.range[1] and row <= entry.range[2] then blocked[win] = true; break end
@@ -497,6 +499,23 @@ function M.sync_cursorline()
             changed = changed or win == current
         end
     end
+    for win, saved in pairs(cursorline_extmark_windows) do
+        if not vim.api.nvim_win_is_valid(win) then cursorline_extmark_windows[win] = nil
+        elseif not rendered[win] then
+            if vim.w[win].auto_cursorline_extmark == true then
+                vim.w[win].auto_cursorline_extmark = saved.value
+                changed = changed or win == current
+            end
+            cursorline_extmark_windows[win] = nil
+        end
+    end
+    for win, enabled in pairs(rendered) do
+        if enabled and not cursorline_extmark_windows[win] and vim.w[win].auto_cursorline_extmark ~= true then
+            cursorline_extmark_windows[win] = { value = vim.w[win].auto_cursorline_extmark }
+            vim.w[win].auto_cursorline_extmark = true
+            changed = changed or win == current
+        end
+    end
     local auto = package.loaded.auto_cursorline
     if changed and type(auto) == 'table' and type(auto.cursor_moved) == 'function' then auto.cursor_moved() end
 end
@@ -504,7 +523,16 @@ end
 local function start()
     if M.timer then return end
     vim.api.nvim_set_decoration_provider(ns, {
-        on_start = function() erase_covered(blockers()) end,
+        on_start = function()
+            -- Retired placements must leave before the new window's native
+            -- text is drawn; erasing them in a scheduled paint is too late.
+            erase_matches(function(rect)
+                return not vim.api.nvim_win_is_valid(rect.win)
+                    or vim.api.nvim_win_get_buf(rect.win) ~= rect.buf
+                    or vim.api.nvim_win_get_tabpage(rect.win) ~= vim.api.nvim_get_current_tabpage()
+            end)
+            erase_covered(blockers())
+        end,
         on_win = function(_, win, buf, top)
             local state = M.active[buf]
             if not state or state.win ~= win then
@@ -585,6 +613,15 @@ function M.update(context, extmarks)
 end
 
 local group = vim.api.nvim_create_augroup('InkstoneTypography', { clear = true })
+vim.api.nvim_create_autocmd('BufWinLeave', { group = group, callback = function(args)
+    local win = vim.api.nvim_get_current_win()
+    erase_matches(function(rect) return rect.buf == args.buf and rect.win == win end)
+end })
+vim.api.nvim_create_autocmd('TabLeave', { group = group, callback = function() M.erase() end })
+vim.api.nvim_create_autocmd('WinClosed', { group = group, callback = function(args)
+    local win = tonumber(args.match)
+    erase_matches(function(rect) return rect.win == win end)
+end })
 vim.api.nvim_create_autocmd({ 'CursorMoved', 'CursorMovedI', 'BufEnter', 'WinEnter', 'WinClosed' }, { group = group, callback = function()
     M.sync_cursorline()
     sync_recovery()

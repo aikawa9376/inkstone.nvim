@@ -226,8 +226,13 @@ If you use `aikawa9376/auto-cursorline.nvim`, update it together with Inkstone.
 While the cursor is on enlarged/small rendered text, Inkstone temporarily
 suppresses auto-cursorline for that window. Moving to ordinary body text or
 restoring source resumes its normal delayed highlight. Other owners of the
-window suppression flag are preserved. Unchanged native screen cells also
-prevent a delayed highlight elsewhere from replaying every heading.
+window suppression flag are preserved. In typography windows the delayed body
+highlight uses a window-scoped row decoration, avoiding native cursorline option
+redraws that can briefly expose unscaled text. Native behavior returns after
+leaving typography. `cursorlineopt=screenline` keeps native wrap semantics.
+Unchanged native screen cells also prevent a delayed highlight elsewhere from
+replaying every heading. Switching buffers/tabs or closing a window retires its
+old overlay before the new view draws, so enlarged glyphs do not remain over it.
 
 `demo/rich.md` includes a table, image, scaled headings and small text for trying
 the views. From this checkout, `nvim --clean -u demo/rich_init.lua demo/rich.md`
