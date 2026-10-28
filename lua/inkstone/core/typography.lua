@@ -5,6 +5,7 @@ local ns = vim.api.nvim_create_namespace('inkstone.typography')
 local probe_timeout = 1200
 local cursorline_windows = {}
 local cursorline_extmark_windows = {}
+local sync_recovery
 local function kitty()
     return vim.env.KITTY_WINDOW_ID ~= nil or vim.env.TERM_PROGRAM == 'kitty'
 end
@@ -14,7 +15,32 @@ function M.wrap(data)
     return data
 end
 
+-- An unfocused pane may become hidden without another FocusLost (for example
+-- after focusing its sibling, then changing tmux windows). Validate before
+-- background output instead of trusting a cached visibility bit.
+local function background_visible()
+    local args = { 'tmux', 'display-message', '-p' }
+    if vim.env.TMUX_PANE then vim.list_extend(args, { '-t', vim.env.TMUX_PANE }) end
+    args[#args + 1] = '#{window_active},#{window_zoomed_flag},#{pane_active}'
+    local result = vim.system(args, { text = true, timeout = 100 }):wait()
+    local window, zoom, pane = (result.stdout or ''):match('^(%d),(%d),(%d)')
+    local visible = result.code == 0 and window == '1' and (zoom ~= '1' or pane == '1')
+    if M.tmux then M.tmux.visible = visible end
+    M.suspended = not visible
+    if not visible then
+        M.drawn = {}
+        if M.timer then M.timer:stop() end
+    elseif sync_recovery then sync_recovery() end
+    return visible
+end
+
+local function needs_visibility_check()
+    return vim.env.TMUX and (M.focused == false or (M.tmux and M.tmux.focus_events == false))
+end
+
 local function send(data)
+    if needs_visibility_check() and not M.painting and not background_visible() then return end
+    if M.suspended or (M.tmux and M.tmux.visible == false) then return end
     if data ~= '' and vim.api.nvim_ui_send then vim.api.nvim_ui_send(M.wrap(data)) end
 end
 
@@ -101,18 +127,26 @@ function M.refresh_tmux(callback)
         if callback then callback() end
         return
     end
-    if M.querying then return end
+    M.tmux_callbacks = M.tmux_callbacks or {}
+    if callback then M.tmux_callbacks[#M.tmux_callbacks + 1] = callback end
+    if M.querying then M.query_again = true; return end
     M.querying = true
     local args = { 'tmux', 'display-message', '-p' }
     if vim.env.TMUX_PANE then vim.list_extend(args, { '-t', vim.env.TMUX_PANE }) end
-    args[#args + 1] = '#{pane_top},#{pane_left},#{allow-passthrough},#{status},#{status-position},#{client_termtype}'
+    args[#args + 1] = '#{pane_top},#{pane_left},#{allow-passthrough},#{status},#{status-position},#{client_termtype},#{window_active},#{window_zoomed_flag},#{pane_active},#{focus-events}'
     vim.system(args, { text = true, timeout = 1000 }, function(result)
         vim.schedule(function()
             M.querying = false
-            local top, left, allowed, status, position, terminal = (result.stdout or ''):match(
-                '^(%d+),(%d+),([^,]*),([^,]*),([^,]*),([^\r\n]*)')
+            -- A focus change during an in-flight query needs fresh visibility;
+            -- do not release its callbacks using the pre-switch snapshot.
+            if M.query_again then M.query_again = nil; M.refresh_tmux(); return end
+            local fields = vim.split((result.stdout or ''):gsub('[\r\n]+$', ''), ',', { plain = true })
+            local top, left, allowed, status, position, terminal = unpack(fields, 1, 6)
             M.tmux = { top = tonumber(top) or 0, left = tonumber(left) or 0,
-                allowed = result.code == 0 and (allowed == 'on' or allowed == 'all'), terminal = terminal }
+                allowed = result.code == 0 and (allowed == 'on' or allowed == 'all'), terminal = terminal,
+                visible = result.code == 0 and fields[7] ~= '0' and (fields[8] ~= '1' or fields[9] == '1'),
+                focus_events = fields[10] ~= '0' }
+            if M.focused == nil then M.focused = M.tmux.visible and fields[9] ~= '0' and M.tmux.focus_events end
             if position == 'top' and status ~= 'off' then M.tmux.top = M.tmux.top + (tonumber(status) or 1) end
             local previous = M.capability
             M.capability = M.version_supported(terminal)
@@ -121,7 +155,9 @@ function M.refresh_tmux(callback)
                 for buf, active in pairs(M.active) do M.waiters[buf] = active.win end
             end
             refresh_waiters()
-            if callback then callback() end
+            local callbacks = M.tmux_callbacks
+            M.tmux_callbacks = {}
+            for _, cb in ipairs(callbacks) do cb() end
         end)
     end)
 end
@@ -372,7 +408,9 @@ local function native_cells(rect)
 end
 
 function M.paint(force)
-    if M.painting or not M.tmux or not M.tmux.allowed or M.capability ~= true then return end
+    if needs_visibility_check() and not M.painting and not background_visible() then return end
+    if M.painting or M.suspended or not M.tmux or not M.tmux.allowed
+        or M.tmux.visible == false or M.capability ~= true then return end
     M.painting = true
     local out, regions, wanted, previous, covers = {}, {}, {}, {}, blockers()
     for _, rect in ipairs(M.drawn) do previous[rect.key] = rect end
@@ -461,8 +499,9 @@ end
 -- Avoid continually rewriting unchanged fractional multicells while idle.
 -- Native damage is event-driven; periodic foreign-redraw recovery
 -- is opt-in and must never repaint windows that did not request it.
-local function sync_recovery()
+sync_recovery = function()
     if not M.timer then return end
+    if M.suspended or (M.tmux and M.tmux.visible == false) then M.timer:stop(); return end
     for buf, state in pairs(M.active) do
         if state.recovery and vim.api.nvim_win_is_valid(state.win)
             and vim.api.nvim_win_get_buf(state.win) == buf
@@ -625,7 +664,26 @@ function M.update(context, extmarks)
     M.schedule()
 end
 
+function M.check_visibility()
+    if not vim.env.TMUX then return end
+    -- FocusLost arrives as tmux switches views. Block both paint and erase
+    -- immediately: passthrough=all otherwise writes over the destination.
+    M.suspended = true
+    M.visibility_generation = (M.visibility_generation or 0) + 1
+    local generation = M.visibility_generation
+    M.refresh_tmux(function()
+        if generation ~= M.visibility_generation then return end
+        M.suspended = not M.tmux.visible
+        if M.suspended then M.drawn = {} else M.schedule(true) end
+        sync_recovery()
+    end)
+end
+
 local group = vim.api.nvim_create_augroup('InkstoneTypography', { clear = true })
+vim.api.nvim_create_autocmd({ 'FocusLost', 'FocusGained' }, { group = group, callback = function(args)
+    M.focused = args.event == 'FocusGained'
+    M.check_visibility()
+end })
 vim.api.nvim_create_autocmd('BufWinLeave', { group = group, callback = function(args)
     local win = vim.api.nvim_get_current_win()
     erase_matches(function(rect) return rect.buf == args.buf and rect.win == win end)
@@ -639,7 +697,8 @@ vim.api.nvim_create_autocmd({ 'CursorMoved', 'CursorMovedI', 'BufEnter', 'WinEnt
     M.sync_cursorline()
     sync_recovery()
 end })
-vim.api.nvim_create_autocmd({ 'VimResized', 'FocusGained' }, { group = group, callback = function()
+vim.api.nvim_create_autocmd({ 'VimResized', 'FocusGained' }, { group = group, callback = function(args)
+    if args.event == 'FocusGained' and vim.env.TMUX then return end
     if not next(M.active) and not M.probing and not next(M.waiters or {}) then return end
     M.erase(); M.tmux = nil
     M.refresh_tmux(function() M.schedule() end)

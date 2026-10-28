@@ -697,6 +697,73 @@ class TerminalTests(unittest.TestCase):
             self.pump(.2)
             self.assert_source()
 
+    def test_hidden_tmux_window_cannot_paint_or_erase_the_destination(self):
+        self.check_tmux_hidden_window('on')
+
+    def test_hidden_tmux_window_is_safe_without_focus_notifications(self):
+        self.check_tmux_hidden_window('off')
+
+    def check_tmux_hidden_window(self, focus):
+        self.tmux('set-option', '-g', 'allow-passthrough', 'all')
+        self.tmux('set-option', '-g', 'focus-events', focus)
+        self.render(['BEFORE', '', '# FIRST', '', '## SECOND', '', 'BODY'])
+        self.lua("vim.env.KITTY_WINDOW_ID='1'; require('inkstone.api').render({buf=vim.api.nvim_get_current_buf()}); vim.wait(200)")
+        self.pump(.2)
+        source = self.tmux('display-message', '-p', '#{window_id}')
+        other = self.tmux('new-window', '-d', '-P', '-F', '#{window_id}', 'sh', '-c',
+                          "printf 'PLAIN BEFORE\\n\\nPLAIN AFTER\\n'; sleep 60")
+        self.tmux('select-window', '-t', other)
+        self.pump(.2)
+        self.lua("vim.cmd('redraw!'); require('inkstone.core.typography').erase(); vim.cmd('redraw!')")
+        self.pump(.25)
+        self.assertFalse(any(c.get('mcd') for row in range(24) for c in self.screen.cpu_cells(row)))
+        self.assertIn('PLAIN AFTER', self.visible_text())
+        self.tmux('select-window', '-t', source)
+        if focus == 'off':
+            self.lua("vim.cmd('redraw')")
+        self.pump(.35)
+        text = [c['text'] for row in range(24) for c in self.screen.cpu_cells(row)
+                if c.get('mcd') and c['x'] == 0 and c['y'] == 0]
+        self.assertIn('FIRST', text)
+        self.assertIn('SECOND', text)
+        self.assert_source()
+
+    def test_unfocused_tmux_pane_rechecks_window_and_zoom_visibility(self):
+        self.tmux('set-option', '-g', 'allow-passthrough', 'all')
+        self.tmux('set-option', '-g', 'focus-events', 'on')
+        self.render(['BEFORE', '', '# FIRST', '', '## SECOND', '', 'BODY'])
+        self.lua("vim.env.KITTY_WINDOW_ID='1'; require('inkstone.api').render({buf=vim.api.nvim_get_current_buf()}); vim.wait(200)")
+        self.pump(.2)
+        source = self.tmux('display-message', '-p', '#{window_id}')
+        sibling = self.tmux('split-window', '-h', '-d', '-P', '-F', '#{pane_id}', 'sleep', '60')
+        self.pump(.2)
+        self.tmux('select-pane', '-t', sibling)
+        self.pump(.25)
+
+        def scaled_text():
+            return [c['text'] for row in range(24) for c in self.screen.cpu_cells(row)
+                    if c.get('mcd') and c['x'] == 0 and c['y'] == 0]
+
+        self.assertIn('FIRST', scaled_text(), 'visible inactive panes keep typography')
+        self.tmux('resize-pane', '-Z', '-t', sibling)
+        self.lua("vim.cmd('redraw!')")
+        self.pump(.2)
+        self.assertEqual(scaled_text(), [])
+        self.tmux('resize-pane', '-Z', '-t', sibling)
+        self.lua("vim.cmd('redraw!')")
+        self.pump(.25)
+        self.assertIn('FIRST', scaled_text())
+        other = self.tmux('new-window', '-d', '-P', '-F', '#{window_id}', 'sleep', '60')
+        self.tmux('select-window', '-t', other)
+        self.lua("vim.cmd('redraw!')")
+        self.pump(.25)
+        self.assertEqual(scaled_text(), [])
+        self.tmux('select-window', '-t', source)
+        self.lua("vim.cmd('redraw!')")
+        self.pump(.25)
+        self.assertIn('FIRST', scaled_text())
+        self.assert_source()
+
     def test_periodic_typography_recovery_only_replays_opted_in_buffers(self):
         self.tmux('set-option', '-g', 'allow-passthrough', 'on')
         self.render(['BEFORE', '', '## FIRST', '', 'BODY'])

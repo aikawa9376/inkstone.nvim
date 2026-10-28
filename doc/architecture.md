@@ -185,6 +185,19 @@ H2/H3 sizes. Periodic replays are observable output even without explicit erases
 final multicell metadata alone does not establish that intermediate GPU frames
 are stable.
 
+Passthrough permission alone is not visibility: `allow-passthrough=all` also
+forwards output from hidden panes into the attached client's current view.
+`check_visibility` suspends output immediately on focus transitions and reads
+window/pane/zoom visibility over the tmux socket before resuming. Hidden owners
+are forgotten without sending glyph erases into the destination view. An
+unfocused pane can later become hidden without another FocusLost, so
+`background_visible` validates visibility before background paint/erase output;
+it also guards configurations without focus notifications. Focused panes with
+focus notifications use the cached fast path. Queued geometry callbacks wait for
+a fresh snapshot if focus changes during an in-flight query. Hidden recovery
+timers stop, and FocusGained restores visible placements without changing tmux
+options. Without focus notifications, the next native redraw restores them.
+
 With updated auto-cursorline.nvim, `sync_cursorline` temporarily owns
 `w:auto_cursorline_disabled` while the cursor is on a shown typography range.
 It restores the previous value on ordinary rows, buffer/window changes or

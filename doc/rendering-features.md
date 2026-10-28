@@ -229,6 +229,12 @@ it is disabled by default. The
 terminal tests cover multicell size metadata, tmux refresh, pane offsets, source
 restoration and float occlusion; they do not prove every GPU/font combination.
 
+With `allow-passthrough=all`, Inkstone still suppresses output from hidden tmux
+windows or panes hidden by zoom. A visible pane keeps its typography when focus
+moves to a sibling; background output rechecks visibility so later window
+switches cannot replay old headings into the new view. Returning to the pane
+restores its text through focus notifications or the next Neovim redraw.
+
 If you use `aikawa9376/auto-cursorline.nvim`, update it together with Inkstone.
 While the cursor is on enlarged/small rendered text, Inkstone temporarily
 suppresses auto-cursorline for that window. Moving to ordinary body text or

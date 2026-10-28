@@ -407,6 +407,32 @@ return function(test, equal, buffer)
         vim.env.TMUX, typography.tmux, typography.capability, vim.api.nvim_ui_send = tmux, cached, capability, send
     end)
 
+    test('tmux focus changes wait for a fresh visibility snapshot', function()
+        local typography = require('inkstone.core.typography')
+        local system, tmux = vim.system, vim.env.TMUX
+        local keys = { 'tmux', 'capability', 'querying', 'query_again', 'tmux_callbacks', 'active',
+            'drawn', 'waiters', 'suspended', 'focused', 'visibility_generation', 'timer', 'force', 'pending' }
+        local saved = {}
+        for _, key in ipairs(keys) do saved[key] = typography[key]; typography[key] = nil end
+        typography.active, typography.drawn, typography.waiters, typography.capability = {}, {}, {}, true
+        local pending, released = {}, 0
+        vim.env.TMUX = 'test'
+        vim.system = function(_, _, callback) pending[#pending + 1] = callback end
+        typography.refresh_tmux(function() released = released + 1 end)
+        typography.check_visibility()
+        assert(typography.suspended)
+        pending[1]({ code = 0, stdout = '0,0,all,off,bottom,kitty(0.49.2),1,0,1\n' })
+        assert(vim.wait(200, function() return #pending == 2 end, 5))
+        equal(released, 0)
+        assert(typography.suspended)
+        pending[2]({ code = 0, stdout = '0,0,all,off,bottom,kitty(0.49.2),0,0,1\n' })
+        assert(vim.wait(200, function() return released == 1 end, 5))
+        equal(typography.tmux.visible, false)
+        assert(typography.suspended)
+        vim.system, vim.env.TMUX = system, tmux
+        for _, key in ipairs(keys) do typography[key] = saved[key] end
+    end)
+
     external_test('PDF viewer turns real pages and rejects the end of the document', { 'magick', 'gs' }, function()
         local media, viewer = require('inkstone.core.media'), require('inkstone.core.viewer')
         local backend, notify = media.backend, vim.notify
