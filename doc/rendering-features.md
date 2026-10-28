@@ -201,8 +201,11 @@ the smaller size. Nested/indented headings and spans already replaced by table
 or paragraph layouts retain their existing rendering. Set `paragraph.wrap = false`
 when using small spans in long paragraphs. Unrepresentable narrow placements
 fall back to normal text. Fractional sizes use the protocol's rational bounds.
-Full text chunks align to those fractions so their rounded widths do not add
-gaps in ordinary words; a final short chunk can retain trailing padding.
+Integer-size ASCII uses Kitty's normal character layout to avoid visible
+padding between fixed-width text groups. Fractional sizes keep fitting words
+intact and prefer natural spaces between packets. Overlong words still use
+fraction-aligned chunks where possible; highlight boundaries and indivisible
+wide characters can require padding.
 While sized text is active, its native grid cells contain spaces rather than
 a duplicate normal-size title or small span. This prevents ordinary redraws
 from exposing an unscaled copy without Markdown markers. The source buffer

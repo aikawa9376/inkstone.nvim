@@ -192,28 +192,43 @@ function M.spec(ratio)
 end
 
 function M.runs(chunks, spec)
-    local units = require('inkstone.parser.table').units(chunks)
-    local result, text, width, highlight = {}, {}, 0, nil
-    local limit = math.max(1, math.floor(7 * spec.den / spec.num))
-    -- OSC 66 advances by whole scaled cells. A full fractional run must end
-    -- on an exact denominator boundary; otherwise each chunk's rounded tail
-    -- adds a gap in words (e.g. "Images an" + "d diagrams" at 1.5x).
-    local exact = math.floor(limit / spec.den) * spec.den
-    if exact > 0 then limit = exact end
-    local function flush()
-        if width == 0 then return end
-        local cells = math.max(1, math.ceil(width * spec.num / spec.den - 1e-8))
-        result[#result + 1] = { text = table.concat(text), width = cells * spec.scale, cells = cells, highlight = highlight }
-        text, width = {}, 0
-    end
-    for _, unit in ipairs(units) do
+    local units = {}
+    for _, unit in ipairs(require('inkstone.parser.table').units(chunks)) do
         local clean = unit.text:gsub('[%c]', '')
         if clean ~= '' and unit.width > 0 then
-            if width + unit.width > limit or (width > 0 and not vim.deep_equal(highlight, unit.highlight)) then flush() end
-            text[#text + 1], width, highlight = clean, width + unit.width, unit.highlight
+            units[#units + 1] = { text = clean, width = unit.width, highlight = unit.highlight }
         end
     end
-    flush()
+    local result, first = {}, 1
+    local limit = math.max(1, math.floor(7 * spec.den / spec.num))
+    while first <= #units do
+        local highlight, width, stop = units[first].highlight, 0, first - 1
+        local boundary, aligned_boundary, aligned
+        local widths = {}
+        for i = first, #units do
+            local unit = units[i]
+            if not vim.deep_equal(highlight, unit.highlight) or width + unit.width > limit then break end
+            width, stop = width + unit.width, i
+            widths[i] = width
+            if width % spec.den == 0 then aligned = i end
+            local next_unit = units[i + 1]
+            if unit.text:find('%s$') or (next_unit and next_unit.text:find('^%s')) then
+                boundary = i
+                if width % spec.den == 0 then aligned_boundary = i end
+            end
+        end
+        -- Keep fitting words intact, including nine-letter 1.5x words such
+        -- as "paragraph" and "Reproduce". For overlong words, retain exact
+        -- fractional advances whenever a grapheme boundary allows one.
+        if stop < #units and vim.deep_equal(highlight, units[stop + 1].highlight) then
+            stop = aligned_boundary or boundary or aligned or stop
+        end
+        local text = {}
+        for i = first, stop do text[#text + 1] = units[i].text end
+        local cells = math.max(1, math.ceil(widths[stop] * spec.num / spec.den - 1e-8))
+        result[#result + 1] = { text = table.concat(text), width = cells * spec.scale, cells = cells, highlight = highlight }
+        first = stop + 1
+    end
     return result
 end
 
@@ -414,7 +429,11 @@ function M.paint(force)
                             local spec = entry.spec
                             payload[#payload + 1] = ('\27[%d;%dH'):format(at_row, at_col)
                             payload[#payload + 1] = colors(run.highlight, entry.highlight, entry.background)
-                            local meta = ('s=%d:w=%d'):format(spec.scale, run.cells)
+                            -- Fixed-width groups can leave font-metric padding between ASCII
+                            -- chunks even when their grid advances are exact. Kitty's normal
+                            -- per-character sizing avoids that for integer-scale ASCII.
+                            local automatic = spec.num == spec.den and not run.text:find('[\128-\255]')
+                            local meta = ('s=%d:w=%d'):format(spec.scale, automatic and 0 or run.cells)
                             if spec.num < spec.den then meta = meta .. (':n=%d:d=%d:v=2'):format(spec.num, spec.den) end
                             payload[#payload + 1] = '\27]66;' .. meta .. ';' .. run.text .. '\27\\'
                             at_col = at_col + run.width

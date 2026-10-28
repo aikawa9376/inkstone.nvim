@@ -117,6 +117,11 @@ class TerminalTests(unittest.TestCase):
     def visible_text(self):
         return '\n'.join(str(self.screen.line(row)) for row in range(24))
 
+    def scaled_text(self):
+        return '\n'.join(''.join(cell['text'] for cell in self.screen.cpu_cells(row)
+                                  if cell.get('mcd') and cell['x'] == 0 and cell['y'] == 0)
+                          for row in range(24))
+
     def assert_source(self):
         result = self.lua("print(vim.json.encode(vim.api.nvim_buf_get_lines(0,0,-1,false)))")
         self.assertEqual(json.loads(result), self.lines)
@@ -317,9 +322,15 @@ class TerminalTests(unittest.TestCase):
 
         def style(text):
             for row in range(24):
-                for col, cell in enumerate(self.screen.cpu_cells(row)):
-                    if cell.get('mcd') and cell['x'] == 0 and cell['y'] == 0 and text in cell['text']:
+                leads = [(col, cell) for col, cell in enumerate(self.screen.cpu_cells(row))
+                         if cell.get('mcd') and cell['x'] == 0 and cell['y'] == 0]
+                offset = ''.join(cell['text'] for _, cell in leads).find(text)
+                if offset < 0:
+                    continue
+                for col, cell in leads:
+                    if offset < len(cell['text']):
                         return self.screen.line(row).cursor_from(col)
+                    offset -= len(cell['text'])
             self.fail('Missing sized text: ' + text)
 
         head = style('HEAD')
@@ -402,14 +413,47 @@ class TerminalTests(unittest.TestCase):
             if not leads:
                 continue
             rendered.append(''.join(cell['text'] for _, cell in leads))
-            for (col, cell), (next_col, _) in zip(leads, leads[1:]):
+            for (col, cell), (next_col, next_cell) in zip(leads, leads[1:]):
                 meta = cell['mcd']
                 numerator, denominator = meta['subscale_n'] or 1, meta['subscale_d'] or 1
-                self.assertEqual((next_col - col) * denominator,
-                                 len(cell['text']) * meta['scale'] * numerator,
-                                 (row, col, cell))
+                expected = len(cell['text']) * meta['scale'] * numerator
+                actual = (next_col - col) * denominator
+                if actual != expected:
+                    self.assertTrue(cell['text'][-1].isspace() or next_cell['text'][0].isspace(),
+                                    (row, col, cell))
+                    self.assertGreaterEqual(actual, expected)
         self.assertEqual(rendered, ['Integer heading', 'Images and diagrams',
                                     'Formatting and rendering', 'Images and diagrams'])
+        self.assert_source()
+
+    def test_photographed_word_gaps_use_native_ascii_cells_and_unsplit_fractional_words(self):
+        self.tmux('set-option', '-g', 'allow-passthrough', 'on')
+        self.render(['BEFORE', '', '# Performance evidence', '', '## Reproduce', '',
+                     '## Incremental rendering with paragraph reflow', '', 'AFTER'])
+        self.lua("vim.env.KITTY_WINDOW_ID='1'; require('inkstone.api').render({buf=vim.api.nvim_get_current_buf()}); vim.wait(150)")
+        self.pump(.2)
+        leads = [(row, col, cell) for row in range(24) for col, cell in enumerate(self.screen.cpu_cells(row))
+                 if cell.get('mcd') and cell['x'] == 0 and cell['y'] == 0]
+        integer = [(col, cell) for _, col, cell in leads if not cell['mcd']['subscale_n']]
+        self.assertEqual(''.join(cell['text'] for _, cell in integer), 'Performance evidence')
+        self.assertTrue(all(len(cell['text']) == 1 for _, cell in integer))
+        for (col, _), (next_col, _) in zip(integer, integer[1:]):
+            self.assertEqual(next_col - col, 2)
+        for word in ('Reproduce', 'paragraph'):
+            self.assertTrue(any(word in cell['text'] for _, _, cell in leads), word)
+        self.assertIn('Incremental rendering with paragraph reflow', self.scaled_text())
+
+        # Replay the exact unwrapped packets without tmux: cell positions and
+        # payloads must agree, isolating grouping from passthrough transport.
+        direct = Screen(None, 24, 120, 100)
+        packets = json.loads(self.lua("print(vim.json.encode(require('inkstone.core.typography').drawn))"))
+        for packet in packets:
+            data = packet['payload'].encode()
+            direct.test_commit_write_buffer(data, direct.test_create_write_buffer())
+            direct.test_parse_written_data()
+        direct_leads = [(row, col, cell) for row in range(24) for col, cell in enumerate(direct.cpu_cells(row))
+                        if cell.get('mcd') and cell['x'] == 0 and cell['y'] == 0]
+        self.assertEqual(leads, direct_leads)
         self.assert_source()
 
     def test_cursor_movement_keeps_typography_without_erase_frames(self):
@@ -471,8 +515,7 @@ class TerminalTests(unittest.TestCase):
         for i in range(3):
             self.lua("vim.api.nvim_buf_set_lines(_G.cover_buf,0,-1,false,{'popup " + str(i) + "'}); vim.cmd('redraw')")
             self.pump(.08)
-            text = [cell['text'] for row in range(24) for cell in self.screen.cpu_cells(row)
-                    if cell.get('mcd') and cell['x'] == 0 and cell['y'] == 0]
+            text = self.scaled_text()
             self.assertNotIn('TOP', text)
             self.assertIn('LOWER', text)
         self.lua('vim.api.nvim_win_close(_G.cover_win,true)')
@@ -547,8 +590,7 @@ class TerminalTests(unittest.TestCase):
                 self.assertEqual(self.lua("local w=vim.api.nvim_get_current_win(); local a=vim.fn.screenpos(w," + str(row) + ",1); local b=vim.fn.screenpos(w,12,1); "
                                  "print(vim.fn.screenattr(a.row,a.col)~=vim.fn.screenattr(b.row,b.col))"), 'true')
             self.assertEqual(int(self.lua('print(_G.typography_clears)')), 0)
-            text = [cell['text'] for line in range(24) for cell in self.screen.cpu_cells(line)
-                    if cell.get('mcd') and cell['x'] == 0 and cell['y'] == 0]
+            text = self.scaled_text()
             self.assertIn('FIRST', text)
             self.assertIn('SECOND', text)
             self.assertIn('THIRD', text)
@@ -584,8 +626,7 @@ class TerminalTests(unittest.TestCase):
         self.pump(.15)
         self.lua("require('inkstone.api').refresh(); vim.wait(150)")
         self.pump(.2)
-        text = [cell['text'] for line in range(24) for cell in self.screen.cpu_cells(line)
-                if cell.get('mcd') and cell['x'] == 0 and cell['y'] == 0]
+        text = self.scaled_text()
         for heading in ('FIRST', 'SECOND', 'THIRD'):
             self.assertIn(heading, text)
         self.assert_source()
@@ -601,8 +642,7 @@ class TerminalTests(unittest.TestCase):
         self.pump(.1)
 
         def scaled_text():
-            return [cell['text'] for row in range(24) for cell in self.screen.cpu_cells(row)
-                    if cell.get('mcd') and cell['x'] == 0 and cell['y'] == 0]
+            return self.scaled_text()
 
         label = self.lua('print(_G.repair_label)')
         self.assertNotIn(label, scaled_text(), 'native repaint must actually overwrite the overlay')
@@ -656,8 +696,7 @@ class TerminalTests(unittest.TestCase):
         self.frame_observer = None
         self.lua("vim.cmd('redraw!')")
         self.pump(.2)
-        text = [cell['text'] for row in range(24) for cell in self.screen.cpu_cells(row)
-                if cell.get('mcd') and cell['x'] == 0 and cell['y'] == 0]
+        text = self.scaled_text()
         for label in ('FIRST', 'SECOND', 'THIRD', 'SMALL'):
             self.assertIn(label, text)
         self.lua("require('inkstone.api').typography(); vim.wait(150)")
@@ -683,8 +722,7 @@ class TerminalTests(unittest.TestCase):
         frames = []
 
         def observe():
-            text = [cell['text'] for row in range(24) for cell in self.screen.cpu_cells(row)
-                    if cell.get('mcd') and cell['x'] == 0 and cell['y'] == 0]
+            text = self.scaled_text()
             frames.append([label for label in ('FIRST', 'SECOND', 'THIRD') if label not in text])
 
         self.frame_observer = observe
@@ -751,8 +789,7 @@ class TerminalTests(unittest.TestCase):
         if focus == 'off':
             self.lua("vim.cmd('redraw')")
         self.pump(.35)
-        text = [c['text'] for row in range(24) for c in self.screen.cpu_cells(row)
-                if c.get('mcd') and c['x'] == 0 and c['y'] == 0]
+        text = self.scaled_text()
         self.assertIn('FIRST', text)
         self.assertIn('SECOND', text)
         self.assert_source()
@@ -770,14 +807,13 @@ class TerminalTests(unittest.TestCase):
         self.pump(.25)
 
         def scaled_text():
-            return [c['text'] for row in range(24) for c in self.screen.cpu_cells(row)
-                    if c.get('mcd') and c['x'] == 0 and c['y'] == 0]
+            return self.scaled_text()
 
         self.assertIn('FIRST', scaled_text(), 'visible inactive panes keep typography')
         self.tmux('resize-pane', '-Z', '-t', sibling)
         self.lua("vim.cmd('redraw!')")
         self.pump(.2)
-        self.assertEqual(scaled_text(), [])
+        self.assertFalse(scaled_text().strip())
         self.tmux('resize-pane', '-Z', '-t', sibling)
         self.lua("vim.cmd('redraw!')")
         self.pump(.25)
@@ -786,7 +822,7 @@ class TerminalTests(unittest.TestCase):
         self.tmux('select-window', '-t', other)
         self.lua("vim.cmd('redraw!')")
         self.pump(.25)
-        self.assertEqual(scaled_text(), [])
+        self.assertFalse(scaled_text().strip())
         self.tmux('select-window', '-t', source)
         self.lua("vim.cmd('redraw!')")
         self.pump(.25)

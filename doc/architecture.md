@@ -144,12 +144,18 @@ still restores source. Whitespace reservation removes the duplicate copy; it
 does not make the terminal overlay independent of native grid repaint timing.
 Inline code containing those literal tags is not interpreted as markup.
 Payloads contain sanitized text and grapheme-safe chunks within OSC 66's bounds.
-Fractional runs use denominator-aligned chunk limits when representable within
-the protocol's seven-cell width bound. Arbitrary limits rounded each chunk up
-and inserted visible padding inside words, such as "Images an" / "d diagrams"
-at 1.5x. Full ASCII chunks now occupy their exact scaled advance; a final short
-chunk may retain trailing padding. Highlight boundaries and indivisible wide
-graphemes still obey the protocol's integer cell constraints.
+Integer-scale ASCII uses OSC 66's automatic width (`w=0`), so Kitty lays out
+individual characters on the scaled grid. Grouping seven ASCII characters in
+one fixed-width multicell can leave font-metric padding at packet boundaries
+even when cell advances are exact (the photographed "evi dence" case).
+Non-ASCII clusters retain explicit widths. Fractional runs prefer whitespace
+boundaries and keep words within the protocol's seven-cell width limit intact;
+1.5x can fit all nine letters of "paragraph" or "Reproduce" in one packet.
+When a word exceeds the limit, prefer denominator-aligned grapheme boundaries
+to avoid adding integer-cell padding inside it. Highlight changes and
+indivisible wide graphemes still constrain grouping. Rounded advances can
+remain at natural spaces or an unrepresentable boundary; this is not arbitrary
+subcell positioning or a promise about every font's pixel metrics.
 Kitty 0.40+ is required: under tmux, read its cached `client_termtype` alongside
 pane geometry over the tmux socket; do not send XTVERSION through passthrough.
 tmux consumes its first terminal-identity reply, then may translate later ones

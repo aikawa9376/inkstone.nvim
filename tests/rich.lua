@@ -355,7 +355,7 @@ return function(test, equal, buffer)
 
     test('fractional typography does not round space into the middle of words', function()
         local typography = require('inkstone.core.typography')
-        local text = 'Images and diagrams and formatting'
+        local text = string.rep('M', 41)
         for _, ratio in ipairs({ .8, 1.25, 1.5, 2 }) do
             local spec = assert(typography.spec(ratio))
             local runs = typography.runs({ { text, 'Normal' } }, spec)
@@ -366,6 +366,23 @@ return function(test, equal, buffer)
                 if i < #runs then equal(run.width, vim.fn.strdisplaywidth(run.text) * spec.ratio) end
             end
             equal(table.concat(joined), text)
+        end
+    end)
+
+    test('fractional typography keeps fitting words intact and preserves text and highlights', function()
+        local typography = require('inkstone.core.typography')
+        local spec = typography.spec(1.5)
+        for _, text in ipairs({ 'Reproduce', 'Incremental rendering with paragraph reflow' }) do
+            local runs = typography.runs({ { text, 'Normal' } }, spec)
+            local joined = {}
+            for _, run in ipairs(runs) do
+                joined[#joined + 1] = run.text
+                assert(run.cells <= 7)
+                equal(run.highlight, 'Normal')
+            end
+            equal(table.concat(joined), text)
+            local word = text == 'Reproduce' and 'Reproduce' or 'paragraph'
+            assert(vim.iter(runs):any(function(run) return run.text:find(word, 1, true) ~= nil end))
         end
     end)
 
