@@ -206,6 +206,10 @@ padding between fixed-width text groups. Fractional sizes keep fitting words
 intact and prefer natural spaces between packets. Overlong words still use
 fraction-aligned chunks where possible; highlight boundaries and indivisible
 wide characters can require padding.
+Fractional spaces reuse the preceding word's unused width to reduce unusually
+wide word gaps. At 1.5x, ordinary single spaces in the tested ASCII cases span
+1.5–2 native cells; the cell grid still prevents perfectly uniform fractional
+spacing. This keeps literal spaces and independently highlighted whitespace.
 While sized text is active, its native grid cells contain spaces rather than
 a duplicate normal-size title or small span. This prevents ordinary redraws
 from exposing an unscaled copy without Markdown markers. The source buffer

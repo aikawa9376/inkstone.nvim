@@ -386,6 +386,41 @@ return function(test, equal, buffer)
         end
     end)
 
+    test('fractional spaces absorb word padding without losing text or shrinking glyph reservations', function()
+        local typography = require('inkstone.core.typography')
+        for _, ratio in ipairs({ .8, 1.25, 1.5 }) do
+            local spec = typography.spec(ratio)
+            for length = 1, math.min(9, math.floor(7 * spec.den / spec.num)) do
+                for _, spaces in ipairs({ 1, 2, 5 }) do
+                    local word = ('M'):rep(length)
+                    local text = word .. (' '):rep(spaces) .. 'X'
+                    local runs = typography.runs({ { text, 'Normal' } }, spec)
+                    local joined, col, ink_end, next_word = {}, 0, nil, nil
+                    for _, run in ipairs(runs) do
+                        joined[#joined + 1] = run.text
+                        assert(run.cells <= 7)
+                        if not run.space then
+                            local body = run.text:gsub(' +$', '')
+                            assert(vim.fn.strdisplaywidth(run.text) * ratio <= run.width + 1e-8,
+                                'never shrink a word to make room for a space')
+                            if body == word then ink_end = col + length * ratio
+                            elseif body == 'X' then next_word = col end
+                        end
+                        col = col + run.width
+                    end
+                    equal(table.concat(joined), text)
+                    local gap = assert(next_word) - assert(ink_end)
+                    assert(gap > 0 and math.abs(gap - spaces * ratio) < 1 + 1e-8,
+                        vim.inspect({ ratio = ratio, length = length, spaces = spaces, gap = gap }))
+                end
+            end
+        end
+        local runs = typography.runs({ { 'ABCDEFG', 'Bold' }, { ' ', 'Other' }, { 'X', 'Bold' } }, typography.spec(1.5))
+        equal(runs[2].highlight, 'Other')
+        equal(runs[2].text, ' ')
+        assert(runs[2].space and runs[2].width > 0, 'retain independently highlighted whitespace')
+    end)
+
     test('terminal probe guards fragmented replies and drains after disable or retry', function()
         local typography = require('inkstone.core.typography')
         local tmux = vim.env.TMUX; vim.env.TMUX = nil

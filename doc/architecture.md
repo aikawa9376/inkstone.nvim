@@ -156,6 +156,17 @@ to avoid adding integer-cell padding inside it. Highlight changes and
 indivisible wide graphemes still constrain grouping. Rounded advances can
 remain at natural spaces or an unrepresentable boundary; this is not arbitrary
 subcell positioning or a promise about every font's pixel metrics.
+Fractional ASCII spaces are separated from glyph packets. `space_runs` deducts
+the preceding word's unused reservation from the next space's advance, rather
+than rounding both independently. Remaining blank cells use height-one explicit
+width packets; sufficiently large padding can instead contain a literal space
+appended to the preceding same-highlight packet. Never append when the text
+would no longer fit, or merge away independently highlighted whitespace.
+This preserves source text/space counts and avoids shrinking word glyphs.
+Consecutive spaces carry the rounding balance forward. At 1.5x, the tested
+single-space gaps range from 1.5 to 2 native cells instead of ballooning to
+2.5 or 3. Fractional positioning and font metrics still prevent a general
+pixel-identical-space guarantee; integer-scale ASCII is unchanged.
 Kitty 0.40+ is required: under tmux, read its cached `client_termtype` alongside
 pane geometry over the tmux socket; do not send XTVERSION through passthrough.
 tmux consumes its first terminal-identity reply, then may translate later ones

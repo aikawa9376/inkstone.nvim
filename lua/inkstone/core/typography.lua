@@ -191,6 +191,35 @@ function M.spec(ratio)
     return { scale = scale, num = num, den = den, ratio = scale * num / den }
 end
 
+-- Whitespace can consume the preceding word's unused cells rather than
+-- adding another rounded fractional packet on top of that padding.
+local function space_runs(runs, spec)
+    if spec.num == spec.den then return runs end
+    local result, slack = {}, 0
+    for _, run in ipairs(runs) do
+        if run.text:match('^ +$') then
+            for _ = 1, #run.text do
+                local previous = result[#result]
+                local cells = math.max(0, math.floor(spec.ratio - slack + .5))
+                if cells == 0 and previous and slack + 1e-8 >= spec.ratio
+                    and vim.deep_equal(previous.highlight, run.highlight) then
+                    -- Retain the literal space for terminal selection, too.
+                    previous.text = previous.text .. ' '
+                else
+                    cells = math.max(1, cells)
+                    result[#result + 1] = { text = ' ', width = cells, cells = cells,
+                        highlight = run.highlight, space = true }
+                end
+                slack = slack + cells - spec.ratio
+            end
+        else
+            result[#result + 1] = run
+            slack = run.width - vim.fn.strdisplaywidth(run.text) * spec.ratio
+        end
+    end
+    return result
+end
+
 function M.runs(chunks, spec)
     local units = {}
     for _, unit in ipairs(require('inkstone.parser.table').units(chunks)) do
@@ -207,7 +236,8 @@ function M.runs(chunks, spec)
         local widths = {}
         for i = first, #units do
             local unit = units[i]
-            if not vim.deep_equal(highlight, unit.highlight) or width + unit.width > limit then break end
+            if not vim.deep_equal(highlight, unit.highlight) or width + unit.width > limit
+                or (spec.num < spec.den and (unit.text == ' ') ~= (units[first].text == ' ')) then break end
             width, stop = width + unit.width, i
             widths[i] = width
             if width % spec.den == 0 then aligned = i end
@@ -220,7 +250,8 @@ function M.runs(chunks, spec)
         -- Keep fitting words intact, including nine-letter 1.5x words such
         -- as "paragraph" and "Reproduce". For overlong words, retain exact
         -- fractional advances whenever a grapheme boundary allows one.
-        if stop < #units and vim.deep_equal(highlight, units[stop + 1].highlight) then
+        if stop < #units and vim.deep_equal(highlight, units[stop + 1].highlight)
+            and (spec.num == spec.den or (units[stop].text == ' ') == (units[stop + 1].text == ' ')) then
             stop = aligned_boundary or boundary or aligned or stop
         end
         local text = {}
@@ -229,7 +260,7 @@ function M.runs(chunks, spec)
         result[#result + 1] = { text = table.concat(text), width = cells * spec.scale, cells = cells, highlight = highlight }
         first = stop + 1
     end
-    return result
+    return space_runs(result, spec)
 end
 
 local function tag(marks, first, entry)
@@ -426,13 +457,13 @@ function M.paint(force)
                         and not covered(rect, covers) then
                         local at_row, at_col, payload = rect.row, rect.col, {}
                         for _, run in ipairs(line.runs) do
-                            local spec = entry.spec
+                            local spec = run.space and { scale = 1, num = 1, den = 1 } or entry.spec
                             payload[#payload + 1] = ('\27[%d;%dH'):format(at_row, at_col)
                             payload[#payload + 1] = colors(run.highlight, entry.highlight, entry.background)
                             -- Fixed-width groups can leave font-metric padding between ASCII
                             -- chunks even when their grid advances are exact. Kitty's normal
                             -- per-character sizing avoids that for integer-scale ASCII.
-                            local automatic = spec.num == spec.den and not run.text:find('[\128-\255]')
+                            local automatic = not run.space and spec.num == spec.den and not run.text:find('[\128-\255]')
                             local meta = ('s=%d:w=%d'):format(spec.scale, automatic and 0 or run.cells)
                             if spec.num < spec.den then meta = meta .. (':n=%d:d=%d:v=2'):format(spec.num, spec.den) end
                             payload[#payload + 1] = '\27]66;' .. meta .. ';' .. run.text .. '\27\\'

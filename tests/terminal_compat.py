@@ -434,7 +434,8 @@ class TerminalTests(unittest.TestCase):
         self.pump(.2)
         leads = [(row, col, cell) for row in range(24) for col, cell in enumerate(self.screen.cpu_cells(row))
                  if cell.get('mcd') and cell['x'] == 0 and cell['y'] == 0]
-        integer = [(col, cell) for _, col, cell in leads if not cell['mcd']['subscale_n']]
+        integer = [(col, cell) for _, col, cell in leads
+                   if cell['mcd']['scale'] == 2 and not cell['mcd']['subscale_n']]
         self.assertEqual(''.join(cell['text'] for _, cell in integer), 'Performance evidence')
         self.assertTrue(all(len(cell['text']) == 1 for _, cell in integer))
         for (col, _), (next_col, _) in zip(integer, integer[1:]):
@@ -454,6 +455,24 @@ class TerminalTests(unittest.TestCase):
         direct_leads = [(row, col, cell) for row in range(24) for col, cell in enumerate(direct.cpu_cells(row))
                         if cell.get('mcd') and cell['x'] == 0 and cell['y'] == 0]
         self.assertEqual(leads, direct_leads)
+        self.assert_source()
+
+    def test_fractional_word_spaces_do_not_stack_packet_rounding(self):
+        self.tmux('set-option', '-g', 'allow-passthrough', 'on')
+        words = ['A', 'B', 'CD', 'EFG', 'HIJKLMN', 'OPQRSTUV', 'WXYZABCDE', 'Z']
+        text = ' '.join(words)
+        self.render(['BEFORE', '', '## ' + text, '', 'AFTER'])
+        self.lua("vim.env.KITTY_WINDOW_ID='1'; require('inkstone.api').render({buf=vim.api.nvim_get_current_buf()}); vim.wait(150)")
+        self.pump(.2)
+        visible = [(col, cell) for row in range(24) for col, cell in enumerate(self.screen.cpu_cells(row))
+                   if cell.get('mcd') and cell['x'] == 0 and cell['y'] == 0]
+        self.assertEqual(''.join(cell['text'] for _, cell in visible), text)
+        glyphs = [(col, cell['text'].rstrip()) for col, cell in visible if cell['text'].strip()]
+        self.assertEqual([word for _, word in glyphs], words)
+        gaps = [next_col - (col + 1.5 * len(word))
+                for (col, word), (next_col, _) in zip(glyphs, glyphs[1:])]
+        self.assertTrue(all(1.5 <= gap <= 2 for gap in gaps), gaps)
+        self.assertLessEqual(max(gaps) - min(gaps), .5)
         self.assert_source()
 
     def test_cursor_movement_keeps_typography_without_erase_frames(self):
