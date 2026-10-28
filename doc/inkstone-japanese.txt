@@ -70,6 +70,8 @@ typography.enabled='auto' uses tmux's cached client_termtype or, outside tmux,
 a positive terminal reply. No terminal identity query is sent through tmux. Default heading
 sizes are {2, 1.5, 1.25, 1, 1, 1}; literal single-line <small>text</small> uses
 typography.small=0.8. :Inkstone typography toggles it for the current buffer.
+Active typography reserves blank native cells; it does not keep a second,
+normal-size copy underneath. Disabling typography restores ordinary rendering.
 Idle text is not resent. After an external tmux redraw, :Inkstone refresh restores
 the overlay. typography.recovery=true opts into periodic 250ms replays; the
 default is false because repeated fractional-text output can flicker.

@@ -563,6 +563,50 @@ class TerminalTests(unittest.TestCase):
             self.assertIn(heading, text)
         self.assert_source()
 
+    def test_native_redraw_never_exposes_a_normal_size_typography_copy(self):
+        self.tmux('set-option', '-g', 'allow-passthrough', 'on')
+        self.render(['BEFORE', '', '# FIRST', '', '## SECOND', '', '### THIRD', '',
+                     'Normal <small>SMALL</small> after', '', 'AFTER'])
+        self.lua("vim.env.KITTY_WINDOW_ID='1'; local c=require('inkstone.state').get(vim.api.nvim_get_current_buf()); "
+                 "c.paragraph.wrap=false; vim.api.nvim_set_hl(0,'CursorLine',{bg=0x334455}); "
+                 "vim.api.nvim_win_set_cursor(0,{5,0}); vim.wo.cursorline=false; "
+                 "require('inkstone.api').render({buf=vim.api.nvim_get_current_buf()}); vim.wait(200)")
+        self.pump(.2)
+        rectangles = json.loads(self.lua("print(vim.json.encode(require('inkstone.core.typography').drawn))"))
+        self.assertEqual(len(rectangles), 4)
+        for rect in rectangles:
+            self.assertTrue(all(not cell.strip() for cell in rect['native'][::2]), rect['key'])
+        normal_copies = []
+        frames = []
+
+        def observe():
+            frames.append(True)
+            for rect in rectangles:
+                for row in range(rect['screen_row'] - 1, rect['screen_row'] - 1 + rect['height']):
+                    cells = self.screen.cpu_cells(row)
+                    for cell in cells[rect['screen_col'] - 1:rect['screen_col'] - 1 + rect['width']]:
+                        if cell['text'].strip() and not cell.get('mcd'):
+                            normal_copies.append(cell['text'])
+
+        self.frame_observer = observe
+        for enabled in ('true', 'false'):
+            self.lua('vim.wo.cursorline=' + enabled + "; vim.cmd('redraw')")
+            self.pump(.15)
+        self.assertTrue(frames)
+        self.assertEqual(normal_copies, [])
+        self.frame_observer = None
+        self.lua("vim.cmd('redraw!')")
+        self.pump(.2)
+        text = [cell['text'] for row in range(24) for cell in self.screen.cpu_cells(row)
+                if cell.get('mcd') and cell['x'] == 0 and cell['y'] == 0]
+        for label in ('FIRST', 'SECOND', 'THIRD', 'SMALL'):
+            self.assertIn(label, text)
+        self.lua("require('inkstone.api').typography(); vim.wait(150)")
+        self.pump(.2)
+        for label in ('FIRST', 'SECOND', 'THIRD', 'SMALL'):
+            self.assertIn(label, self.visible_text())
+        self.assert_source()
+
     def test_cursorline_and_scaled_text_are_present_in_the_same_terminal_frame(self):
         plugin = Path(os.environ.get('INKSTONE_CURSORLINE_RTP', Path.home() / '.local/share/nvim/lazy/auto-cursorline.nvim'))
         if not (plugin / 'lua/auto_cursorline/init.lua').is_file():

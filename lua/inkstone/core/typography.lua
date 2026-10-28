@@ -186,6 +186,17 @@ local function tag(marks, first, entry)
     for i = first, #list do list[i].typography, list[i].font_id = entry.range, entry.id end
 end
 
+-- Once Kitty support is confirmed, only OSC 66 owns these glyphs. A second
+-- normal-size copy in the native grid becomes visible during native redraws.
+-- Reserve its original cells without putting duplicate text underneath.
+local function reserve(chunks)
+    local result = {}
+    for _, chunk in ipairs(chunks) do
+        result[#result + 1] = { (' '):rep(vim.fn.strdisplaywidth(chunk[1])), chunk[2] }
+    end
+    return result
+end
+
 function M.heading(context, marks, node, data)
     if not M.supports(context) then return false end
     local spec = M.spec(context.config.typography.headings[data.level])
@@ -211,7 +222,7 @@ function M.heading(context, marks, node, data)
     local first, virtual = #marks:get() + 1, {}
     local function chunks(at)
         local out = {}; for _, run in ipairs(at.runs) do out[#out + 1] = { run.text, run.highlight } end
-        return out
+        return reserve(out)
     end
     marks:over(context.config.heading, true, node, { conceal = '', virt_text = chunks(lines[1]), virt_text_pos = 'inline' })
     for i = 1, #lines do
@@ -260,7 +271,7 @@ function M.small(context, parser, marks)
                     context.typography[#context.typography + 1] = entry
                     local first = #own:get() + 1
                     own:add(context.config.paragraph, true, row, col, { end_col = stop, conceal = '',
-                        virt_text = line, virt_text_pos = 'inline' })
+                        virt_text = reserve(line), virt_text_pos = 'inline' })
                     tag(own, first, entry)
                 end
             end
@@ -398,7 +409,7 @@ function M.paint(force)
                             payload[#payload + 1] = '\27]66;' .. meta .. ';' .. run.text .. '\27\\'
                             at_col = at_col + run.width
                         end
-                        -- Clear only the unscaled fallback's trailing cells.
+                        -- Clear only the native reservation's trailing cells.
                         -- Reissuing identical multicells replaces their glyphs
                         -- atomically; no blank frame or full-line erase is needed.
                         if width > line.width then

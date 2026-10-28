@@ -203,6 +203,10 @@ when using small spans in long paragraphs. Unrepresentable narrow placements
 fall back to normal text. Fractional sizes use the protocol's rational bounds.
 Full text chunks align to those fractions so their rounded widths do not add
 gaps in ordinary words; a final short chunk can retain trailing padding.
+While sized text is active, its native grid cells contain spaces rather than
+a duplicate normal-size title or small span. This prevents ordinary redraws
+from exposing an unscaled copy without Markdown markers. The source buffer
+and the normal renderer used when typography is disabled remain intact.
 
 Stock tmux works with `set -g allow-passthrough on`. Inkstone reads the pane
 offset and top status-bar height and uses standard passthrough; it does not
@@ -214,7 +218,7 @@ where they overlap. Actual native damage replays affected glyphs without first
 blanking them. Idle H1/H2/H3 text is not resent. Layout/content changes clear obsolete
 owned extents before rebuilding the grid. Cursor entry restores source only when anti-conceal is enabled;
 disable/setup/wipe stop owned placement timers. This is a terminal text overlay,
-so an external tmux repaint can restore normal text without notifying Neovim.
+so an external tmux repaint can erase the overlay without notifying Neovim.
 Use `:Inkstone refresh` to restore the overlay in that case. If automatic recovery
 is preferred, `typography.recovery=true` enables the former 250ms replay loop
 only for opted-in buffers. Periodic output can cause fractional text to flicker;

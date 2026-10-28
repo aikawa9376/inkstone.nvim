@@ -134,6 +134,14 @@ metadata remain attached to the actual render request.
 `core/typography.lua` owns literal display runs, screen-space placement, terminal
 detection and repaint lifecycle. Headings reserve their scaled rows through
 normal extmarks; eligible `<small>` HTML spans retain source cell positions.
+Once terminal support is confirmed, those extmarks reserve whitespace rather
+than a normal-size copy of the text. The literal runs remain in the OSC 66
+placement. Otherwise a native repaint can expose plain heading text without
+`##`, or draw a second copy over the enlarged text, while the source is still
+concealed correctly. Native reservations preserve display widths and styles;
+unsupported/disabled typography uses the normal renderer, and anti-conceal
+still restores source. Whitespace reservation removes the duplicate copy; it
+does not make the terminal overlay independent of native grid repaint timing.
 Inline code containing those literal tags is not interpreted as markup.
 Payloads contain sanitized text and grapheme-safe chunks within OSC 66's bounds.
 Fractional runs use denominator-aligned chunk limits when representable within
@@ -199,7 +207,7 @@ coordinates can already contain another buffer's text. Ordinary focus changes
 between still-visible windows retain the source window's owned placement.
 
 Native dirty-line replays reissue multicells without a preceding glyph erase;
-only obsolete extents and trailing unscaled fallback cells need explicit clearing.
+only obsolete extents and trailing reserved cells need explicit clearing.
 An external tmux refresh can overwrite passthrough text without a Neovim event.
 `:Inkstone refresh` explicitly rebuilds the current view and forces overlay replay.
 `typography.recovery=true` opts a buffer into the former 250ms foreign-repaint

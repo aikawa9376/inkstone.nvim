@@ -255,6 +255,16 @@ return function(test, equal, buffer)
                 for _, run in ipairs(line.runs) do assert(run.cells <= 7 and not run.text:find('[%c]')) end
             end
         end
+        for _, mark in ipairs(marks) do
+            if mark.font_id then
+                for _, chunk in ipairs(mark.opts.virt_text or {}) do
+                    assert(not chunk[1]:find('%S'), 'native typography underlay must not duplicate glyphs')
+                end
+                for _, line in ipairs(mark.opts.virt_lines or {}) do
+                    for _, chunk in ipairs(line) do assert(not chunk[1]:find('%S')) end
+                end
+            end
+        end
         local dirty = typography.runs({ { 'x\27[31m\ny', 'Normal' } }, typography.spec(2))
         for _, run in ipairs(dirty) do assert(not run.text:find('[%c]')) end
         assert(#marks > 0)
