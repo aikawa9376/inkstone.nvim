@@ -357,10 +357,9 @@ local function window_geometry(win, info, top)
         vim.api.nvim_win_get_width(win), vim.api.nvim_win_get_height(win), info.textoff }
 end
 
--- Decoration callbacks can revisit a whole window for an option change even
--- when the TUI's grid diff does not touch this placement. Only actual cells
--- and attributes under the overlay indicate damage (e.g. delayed cursorline
--- on an unrelated body row must not replay every heading).
+-- Keep native cells for diagnostics, not as proof that an overlay survived.
+-- Re-emitting identical blank cells can erase terminal multicells without
+-- changing anything in Neovim's grid.
 local function native_cells(rect)
     local cells = {}
     for row = rect.screen_row, rect.screen_row + rect.height - 1 do
@@ -410,8 +409,8 @@ function M.paint(force)
                             at_col = at_col + run.width
                         end
                         -- Clear only the native reservation's trailing cells.
-                        -- Reissuing identical multicells replaces their glyphs
-                        -- atomically; no blank frame or full-line erase is needed.
+                        -- Reissue multicells directly, without an extra erase
+                        -- of an intact glyph before its replacement.
                         if width > line.width then
                             payload[#payload + 1] = ('\27[%d;%dH\27[%dX'):format(at_row, at_col, width - line.width)
                         end
@@ -438,7 +437,7 @@ function M.paint(force)
         local revisit = changed or (M.damaged and M.damaged[rect.key])
         rect.native = revisit and native_cells(rect) or old.native
         local recover = force == 'recovery' and M.active[rect.buf].recovery
-        if force == true or recover or changed or (revisit and not vim.deep_equal(old.native, rect.native)) then
+        if force == true or recover or revisit then
             out[#out + 1] = rect.payload
         end
     end
@@ -576,7 +575,10 @@ local function start()
                 end
             end
         end,
-        on_end = function() M.schedule() end,
+        -- TUI/compositor output can overwrite multicells even when no owned
+        -- source row received on_line, or when its blank cells stayed equal.
+        -- Repair after every completed redraw, coalesced into one callback.
+        on_end = function() M.schedule(true) end,
     })
     M.timer = vim.uv.new_timer()
 end

@@ -214,8 +214,11 @@ patch tmux or change its options. Cursor-only redraws leave unaffected overlays
 in place. Damage is tracked per displayed line and placement ownership:
 command input and non-overlapping floating terminals (including fzf) do not
 erase other headings. Floating windows and popup menus take precedence only
-where they overlap. Actual native damage replays affected glyphs without first
-blanking them. Idle H1/H2/H3 text is not resent. Layout/content changes clear obsolete
+where they overlap. At the end of each Neovim redraw, visible sized text is
+replayed once after the native grid flush without first blanking it. Native
+output can erase multicells while writing identical spaces, so equal cell
+contents or missing source-row callbacks cannot safely skip repair. Idle
+H1/H2/H3 text is not resent. Layout/content changes clear obsolete
 owned extents before rebuilding the grid. Cursor entry restores source only when anti-conceal is enabled;
 disable/setup/wipe stop owned placement timers. This is a terminal text overlay,
 so an external tmux repaint can erase the overlay without notifying Neovim.

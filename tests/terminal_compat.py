@@ -484,7 +484,7 @@ class TerminalTests(unittest.TestCase):
                  "t.damaged={}; t.paint(false); local unchanged=#packets; "
                  "vim.api.nvim_buf_set_extmark(0,vim.api.nvim_create_namespace('TypographyDamage'),2,0,"
                  "{virt_text={{'!','ErrorMsg'}},virt_text_win_col=0,priority=10000}); "
-                 "vim.cmd('redraw!'); t.damaged[t.drawn[1].key]=true; "
+                 "vim.cmd('redraw!'); t.damaged={[t.drawn[1].key]=true}; "
                  "t.paint(false); local single=table.concat(packets); "
                  "packets={}; t.paint(true); local recovery=table.concat(packets); vim.api.nvim_ui_send=send; "
                  "print(vim.json.encode({unchanged=unchanged,single=single,recovery=recovery}))"))
@@ -496,7 +496,7 @@ class TerminalTests(unittest.TestCase):
         self.assertNotIn('X', result['recovery'])
         self.assert_source()
 
-    def test_delayed_cursorline_does_not_replay_unaffected_headings(self):
+    def test_delayed_cursorline_keeps_headings_and_body_highlights(self):
         plugin = Path(os.environ.get('INKSTONE_CURSORLINE_RTP', Path.home() / '.local/share/nvim/lazy/auto-cursorline.nvim'))
         if not (plugin / 'lua/auto_cursorline/init.lua').is_file():
             self.skipTest('auto-cursorline.nvim is not installed')
@@ -509,9 +509,9 @@ class TerminalTests(unittest.TestCase):
         self.pump(.3)
         self.lua('vim.opt.rtp:prepend(' + json.dumps(str(plugin)) + '); '
                  "require('auto_cursorline').setup({wait_ms=60}); "
-                 "_G.typography_replays=0; "
+                 "_G.typography_clears=0; "
                  "local send=vim.api.nvim_ui_send; vim.api.nvim_ui_send=function(s) "
-                 "if s:find('FIRST',1,true) or s:find('SECOND',1,true) or s:find('THIRD',1,true) then _G.typography_replays=_G.typography_replays+1 end; return send(s) end")
+                 "if s:find('%d+X') then _G.typography_clears=_G.typography_clears+1 end; return send(s) end")
         for row in (10, 9, 3, 5, 7, 9):
             self.lua('vim.api.nvim_win_set_cursor(0,{' + str(row) + ',0}); require("auto_cursorline").cursor_moved()')
             self.pump(.15)
@@ -520,7 +520,7 @@ class TerminalTests(unittest.TestCase):
             if row in (9, 10):
                 self.assertEqual(self.lua("local w=vim.api.nvim_get_current_win(); local a=vim.fn.screenpos(w," + str(row) + ",1); local b=vim.fn.screenpos(w,12,1); "
                                  "print(vim.fn.screenattr(a.row,a.col)~=vim.fn.screenattr(b.row,b.col))"), 'true')
-            self.assertEqual(int(self.lua('print(_G.typography_replays)')), 0)
+            self.assertEqual(int(self.lua('print(_G.typography_clears)')), 0)
             text = [cell['text'] for line in range(24) for cell in self.screen.cpu_cells(line)
                     if cell.get('mcd') and cell['x'] == 0 and cell['y'] == 0]
             self.assertIn('FIRST', text)
@@ -551,8 +551,9 @@ class TerminalTests(unittest.TestCase):
         self.pump(.15)
         packets = self.lua('print(table.concat(_G.font_packets))')
         self.assertIn('SECOND', packets)
-        self.assertNotIn('FIRST', packets)
-        self.assertNotIn('THIRD', packets)
+        self.assertIn('FIRST', packets)
+        self.assertIn('THIRD', packets)
+        self.assertNotIn('X', packets)
         self.tmux('refresh-client')
         self.pump(.15)
         self.lua("require('inkstone.api').refresh(); vim.wait(150)")
@@ -561,6 +562,35 @@ class TerminalTests(unittest.TestCase):
                 if cell.get('mcd') and cell['x'] == 0 and cell['y'] == 0]
         for heading in ('FIRST', 'SECOND', 'THIRD'):
             self.assertIn(heading, text)
+        self.assert_source()
+
+    def test_redrawn_identical_native_cells_still_repair_scaled_text(self):
+        self.tmux('set-option', '-g', 'allow-passthrough', 'on')
+        self.render(['BEFORE', '', '# FIRST', '', '## SECOND', '', 'BODY'])
+        self.lua("vim.env.KITTY_WINDOW_ID='1'; require('inkstone.api').render({buf=vim.api.nvim_get_current_buf()}); vim.wait(200)")
+        self.pump(.2)
+        self.lua("local t=require('inkstone.core.typography'); local r=t.drawn[1]; "
+                 "_G.repair_label=r.payload:find('FIRST',1,true) and 'FIRST' or 'SECOND'; "
+                 "vim.api.nvim_ui_send(t.wrap(('\\27'..'7\\27[%d;%dH\\27[%dX\\27'..'8'):format(r.row,r.col,r.width)))")
+        self.pump(.1)
+
+        def scaled_text():
+            return [cell['text'] for row in range(24) for cell in self.screen.cpu_cells(row)
+                    if cell.get('mcd') and cell['x'] == 0 and cell['y'] == 0]
+
+        label = self.lua('print(_G.repair_label)')
+        self.assertNotIn(label, scaled_text(), 'native repaint must actually overwrite the overlay')
+        self.lua("local t=require('inkstone.core.typography'); local r=t.drawn[1]; "
+                 "t.damaged={[r.key]=true}; t.schedule()")
+        self.pump(.15)
+        self.assertIn(label, scaled_text(), 'a same-cell redraw must recover without cursor input or a timer')
+        self.lua("local t=require('inkstone.core.typography'); local r=t.drawn[1]; "
+                 "vim.api.nvim_ui_send(t.wrap(('\\27'..'7\\27[%d;%dH\\27[%dX\\27'..'8'):format(r.row,r.col,r.width)))")
+        self.pump(.1)
+        self.assertNotIn(label, scaled_text())
+        self.lua("require('inkstone.core.typography').damaged={}; vim.cmd('redraw')")
+        self.pump(.15)
+        self.assertIn(label, scaled_text(), 'a completed redraw must repair even without explicit source-row damage')
         self.assert_source()
 
     def test_native_redraw_never_exposes_a_normal_size_typography_copy(self):

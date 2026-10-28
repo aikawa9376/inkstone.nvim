@@ -168,16 +168,19 @@ The overlay bypasses tmux using standard passthrough after reading its pane
 coordinates, status placement and allow-passthrough option. It never patches
 or configures tmux. Each drawn line retains its buffer/window/entry ownership,
 native and tmux-adjusted bounds, and output payload. Native damage marks that
-line for replay; the painter compares lines independently, so a redraw in one
-place does not clear or resend every heading. Clearing an unrelated buffer is
+line for replay; the painter compares placement ownership independently, so a
+redraw in one place does not erase every heading. Clearing an unrelated buffer is
 a no-op for placements. Changed geometry/content/entry sets erase only owned
 extents before native redraw. Command-line height changes preserve still-visible
 lines when their origin and width are unchanged. Floats and popup menus erase
-only intersecting lines before they draw, never the rest of the page. Decoration
-callbacks alone do not prove damage: post-flush snapshots of native cells and
-attributes suppress replays when a window-wide option redraw leaves the actual
-placement unchanged. Snapshot reads are limited to flagged/new visible rectangles.
-Idle typography does not replay unchanged text by default, including fractional
+only intersecting lines before they draw, never the rest of the page.
+Every completed Neovim redraw schedules one coalesced replay of visible,
+uncovered placements after the native grid flush. Native output can overwrite
+multicells with identical blank cells, including composed/virtual rows without
+an owned source-row callback. Equal screenstring/screenattr snapshots therefore
+cannot prove the terminal overlay survived. Snapshots remain diagnostic only;
+explicit dirty placements replay even when their native cells are identical.
+Idle typography does not replay text by default, including fractional
 H2/H3 sizes. Periodic replays are observable output even without explicit erases;
 final multicell metadata alone does not establish that intermediate GPU frames
 are stable.
