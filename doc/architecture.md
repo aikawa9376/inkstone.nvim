@@ -25,6 +25,15 @@ Markdown feature coverage remain available; source provenance is in UPSTREAM.jso
 6. Renderers emit mark descriptions. `core/ui.lua` converts and
    applies them through Neovim extmarks; buffers are never rewritten.
 
+Code examples remain literal by default (`nested = false`). `core/ts.lua:render`
+checks each injected tree's location in its Markdown ancestors for fenced or
+indented code blocks. The shared view traversal and handler snapshot exclude
+those trees, so handlers, typography, table views, folds and media use the same
+boundary, including manual table/fold actions. Markdown injected into a non-code
+host remains eligible. Outer code backgrounds/borders and native syntax
+highlighting remain available; `nested = true` opts back into inner rendering.
+Width-preserving display compatibility corrections still apply to source text.
+
 ## Performance boundaries
 
 Code-body backgrounds and padding are limited to coalesced viewport ranges.

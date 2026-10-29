@@ -215,9 +215,8 @@ require('inkstone').setup({
     ignore = function()
         return false
     end,
-    -- Whether markdown should be rendered when nested inside markdown, i.e. markdown code block
-    -- inside markdown file.
-    nested = true,
+    -- Whether injected content inside Markdown code blocks should be rendered.
+    nested = false,
     -- Additional events that will trigger this plugin's render loop.
     change_events = {},
     -- Whether the treesitter highlighter should be restarted after this plugin attaches to its

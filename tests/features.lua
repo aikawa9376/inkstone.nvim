@@ -15,6 +15,92 @@ return function(test, equal, buffer)
         return buf, parser, ctx, require('inkstone.core.handlers').run(ctx, parser)
     end
 
+    test('code examples exclude injected decorations, folds, media and table views by default', function()
+        local typography = require('inkstone.core.typography')
+        local supports = typography.supports
+        typography.supports = function() return true end
+        local lines = { '# Outside', '', '![outside](outside.png)', '' }
+        local first = #lines
+        vim.list_extend(lines, {
+            '````markdown', '# Literal heading', '', '- [x] literal checkbox', '',
+            '| Name | Value |', '| --- | --- |', '| A | 1 |', '',
+            '> [!NOTE]- Literal callout', '> body', '',
+            '<details>', '<summary>Literal details</summary>', '', 'body', '', '</details>', '',
+            '![literal](inside.png)', '', '<small>literal small</small>', '',
+            '```mermaid', 'graph LR', 'A-->B', '```', '````', '',
+            '~~~md', '# Another literal heading', '[link](https://example.com)', '~~~', '',
+            '```html', '<!-- literal comment -->', '<small>literal small</small>', '```', '',
+            '```yaml', '- literal bullet', '```', '',
+            '```latex', '\\alpha', '```', '',
+            '    # Indented code', '    <!-- literal comment -->', '',
+            '```markdown', '# Unclosed literal heading', '', '![literal](unclosed.png)',
+        })
+        local buf, parser, ctx, marks = parse(lines, {
+            code = { enabled = false }, folds = { code = false },
+            pipe_table = { view = 'list' }, media = { enabled = true },
+            typography = { enabled = true }, display_compat = { enabled = false },
+        })
+        typography.supports = supports
+        equal(require('inkstone.state').nested, false)
+        assert(#marks > 0, 'normal Markdown must still render')
+        for _, mark in ipairs(marks) do
+            assert(mark.start_row < first, 'decoration inside code: ' .. vim.inspect(mark))
+        end
+        equal(vim.tbl_map(function(item) return item.row end, ctx.media), { 2 })
+        equal(folds.blocks(buf, parser, ctx.config.folds), {})
+        equal(next(ctx.table_views), nil)
+        equal(#ctx.typography, 1)
+        equal(ctx.typography[1].row, 0)
+        ctx.view.ranges = { { first + 1, first + 8 } }
+        equal(require('inkstone.core.handlers').run(ctx, parser), {})
+        equal(ctx.view.ranges, { { first + 1, first + 8 } })
+        vim.api.nvim_win_set_cursor(0, { 10, 0 })
+        require('inkstone.core.table_views').toggle(buf, vim.api.nvim_get_current_win(), 'list')
+        vim.wait(50, function() return require('inkstone.core.table_views').cache[buf] ~= nil end, 5)
+        equal(require('inkstone.core.table_views').cache[buf], nil)
+        equal(vim.api.nvim_buf_get_lines(buf, 0, -1, false), lines)
+        vim.api.nvim_buf_delete(buf, { force = true })
+    end)
+
+    test('Markdown injected outside code remains renderable in a non-Markdown host', function()
+        vim.treesitter.query.set('html', 'injections', [[
+            (element (text) @injection.content (#set! injection.language "markdown"))
+        ]])
+        inkstone.setup({ anti_conceal = { enabled = false }, code = { enabled = false },
+            media = { enabled = false }, typography = { enabled = false },
+            folds = { code = false }, display_compat = { enabled = false } })
+        local buf = buffer({ '<div>', '# Injected heading', '', '```markdown',
+            '# Literal heading', '```', '</div>' })
+        local parser = vim.treesitter.get_parser(buf, 'html')
+        parser:parse(true)
+        local ctx = Context.new(buf, vim.api.nvim_get_current_win(), require('inkstone.state').get(buf))
+        local marks = require('inkstone.core.handlers').run(ctx, parser)
+        vim.treesitter.query.set('html', 'injections', nil)
+        assert(#marks > 0, 'the first Markdown injection must still render')
+        for _, mark in ipairs(marks) do
+            assert(mark.start_row < 3, 'nested code in an injected document must stay literal')
+        end
+        vim.api.nvim_buf_delete(buf, { force = true })
+    end)
+
+    test('nested rendering remains an explicit opt-in and preserves outer code decoration', function()
+        local lines = { '````markdown', '# Inner heading', '',
+            '![inner](inside.png)', '', '> [!NOTE]- Inner', '> body', '````' }
+        local buf, _, _, marks = parse(lines)
+        assert(#marks > 0, 'the outer code block should retain its background and borders')
+        for _, mark in ipairs(marks) do
+            assert(not mark.replace and not mark.folded, 'code contents must remain literal')
+        end
+        vim.api.nvim_buf_delete(buf, { force = true })
+        local enabled, parser, ctx, nested = parse(lines, { nested = true,
+            code = { enabled = false }, folds = { code = false }, media = { enabled = true },
+            typography = { enabled = false }, display_compat = { enabled = false } })
+        assert(#nested > 0, 'nested=true should still decorate injected Markdown')
+        equal(#ctx.media, 1)
+        equal(#folds.blocks(enabled, parser, ctx.config.folds), 1)
+        vim.api.nvim_buf_delete(enabled, { force = true })
+    end)
+
     test('conceal summaries batch work and display slices preserve overlapping styles', function()
         local buf, _, ctx = parse({ 'abcdefgh' })
         vim.treesitter.stop(buf)

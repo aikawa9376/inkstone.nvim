@@ -8,7 +8,7 @@ end
 function M.blocks(buf, parser, config, view)
     local roots, identities = {}, {}
     local function collect(tree, language)
-        if language:lang() == 'markdown' then
+        if language:lang() == 'markdown' and require('inkstone.core.ts').render(tree, language) then
             local root = tree:root()
             roots[#roots + 1] = root
             identities[#identities + 1] = root:id()

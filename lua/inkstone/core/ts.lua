@@ -12,6 +12,35 @@ M.initialized = false
 ---@type table<string, vim.treesitter.Query>
 M.queries = {}
 
+---Keep code examples literal, including HTML/LaTeX and descendants of a
+---Markdown injection. The outer fence still belongs to the host tree.
+---@param tree TSTree
+---@param language_tree vim.treesitter.LanguageTree
+---@return boolean
+function M.render(tree, language_tree)
+    if state.nested then
+        return true
+    end
+    local row, col = tree:root():range()
+    local parent = language_tree:parent()
+    while parent do
+        if parent:lang() == 'markdown' then
+            for _, host in pairs(parent:trees()) do
+                local node = host:root():named_descendant_for_range(row, col, row, col)
+                while node do
+                    local kind = node:type()
+                    if kind == 'fenced_code_block' or kind == 'indented_code_block' then
+                        return false
+                    end
+                    node = node:parent()
+                end
+            end
+        end
+        parent = parent:parent()
+    end
+    return true
+end
+
 ---called from state on setup
 function M.setup()
     for _, language in ipairs(state.file_types) do

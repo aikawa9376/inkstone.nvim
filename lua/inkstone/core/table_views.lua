@@ -114,7 +114,7 @@ function M.toggle(buf, win, requested)
         local selected
         local query = require('inkstone.core.ts').parse('markdown', '(pipe_table) @table')
         parser:for_each_tree(function(tree, language)
-            if language:lang() ~= 'markdown' then return end
+            if language:lang() ~= 'markdown' or not require('inkstone.core.ts').render(tree, language) then return end
             for _, node in query:iter_captures(tree:root(), buf, row, row + 1) do
                 local r = range(node)
                 if row >= r[1] and row <= r[2] then selected = node; break end

@@ -82,7 +82,11 @@ function View:each_tree(parser, callback)
     if self.trees then
         for _, entry in ipairs(self.trees) do callback(entry[1], entry[2]) end
     else
-        parser:for_each_tree(callback)
+        parser:for_each_tree(function(tree, language_tree)
+            if require('inkstone.core.ts').render(tree, language_tree) then
+                callback(tree, language_tree)
+            end
+        end)
     end
 end
 

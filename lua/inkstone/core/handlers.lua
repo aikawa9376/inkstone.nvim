@@ -23,7 +23,9 @@ function M.run(context, parser)
     local language_roots = {} ---@type table<string, TSNode[]>
     context.view.trees = {}
     parser:for_each_tree(function(tree, language_tree)
-        context.view.trees[#context.view.trees + 1] = { tree, language_tree }
+        if require('inkstone.core.ts').render(tree, language_tree) then
+            context.view.trees[#context.view.trees + 1] = { tree, language_tree }
+        end
     end)
     local table_views = require('inkstone.core.table_views')
     table_views.prepare(context, parser)
@@ -32,7 +34,6 @@ function M.run(context, parser)
         local language = language_tree:lang()
         if
             (state.custom_handlers[language] or M.builtin[language])
-            and (state.nested or M.level(language_tree) == 1)
             and context.view:overlaps(root)
         then
             local roots = language_roots[language]
@@ -87,20 +88,6 @@ function M.run(context, parser)
     marks = require('inkstone.render.compat').apply(context, marks)
     context.view.trees = nil
     return marks
-end
-
----@private
----@param tree? vim.treesitter.LanguageTree
----@return integer
-function M.level(tree)
-    local result = 0
-    while tree do
-        if tree:lang() == 'markdown' then
-            result = result + 1
-        end
-        tree = tree:parent()
-    end
-    return result
 end
 
 ---Run custom & builtin handlers when available. Custom handler is always
