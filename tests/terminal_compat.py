@@ -198,6 +198,34 @@ class TerminalTests(unittest.TestCase):
         self.assertTrue(all(row == bars[0] for row in bars), (bars, self.visible_text()))
         self.assert_source()
 
+    def test_transcript_reflow_preserves_heading_and_body_columns(self):
+        fcntl.ioctl(self.fd, termios.TIOCSWINSZ, struct.pack('HHHH', 24, 60, 0, 0))
+        self.screen.resize(24, 60)
+        os.kill(self.pid, signal.SIGWINCH)
+        self.pump()
+        header = '─ 󰭹 Codex 6.1 Sol High · 2026-10-29 11:58 ' + '─' * 18
+        short = ' 分離しました。既定は次のとおりです。'
+        body = ' ' + '長い本文も自然な文節で折り返して表示します。' * 4
+        self.render([header, short, '', body, header, short, '', 'AFTER'], conceallevel=3)
+
+        def check_columns():
+            rows = [str(self.screen.line(row)).rstrip() for row in range(24)]
+            self.assertEqual(rows.count(header), 2, self.visible_text())
+            self.assertEqual(rows.count(short), 2, self.visible_text())
+            self.assertFalse(any(row.startswith(' ─ 󰭹') for row in rows), self.visible_text())
+            self.assertNotIn('<e2>', self.visible_text())
+            self.assertNotIn('<94>', self.visible_text())
+            self.assertNotIn('<80>', self.visible_text())
+            self.assertIn('AFTER', rows)
+
+        check_columns()
+        for cursor in ((4, 0), (6, 0), (1, 0)):
+            self.lua('vim.api.nvim_win_set_cursor(0,{' + str(cursor[0]) + ',' + str(cursor[1]) + '}); '
+                     "require('inkstone.api').render({buf=vim.api.nvim_get_current_buf()}); vim.wait(100); vim.cmd('redraw!')")
+            self.pump()
+            check_columns()
+        self.assert_source()
+
     def test_paragraph_wrap_preserves_newlines_and_join_is_opt_in(self):
         self.render(['BEFORE', '', '**FIRST_LINE**', 'SECOND_LINE',
                      '今日は天気がいいから散歩しましょう。長い日本語の文章を文節で折り返します。' * 6,

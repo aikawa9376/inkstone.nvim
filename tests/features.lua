@@ -129,6 +129,36 @@ return function(test, equal, buffer)
         vim.api.nvim_buf_delete(buf, { force = true })
     end)
 
+    test('multiline highlight ranges are clipped per row and bounded to disjoint views', function()
+        local lines = { ('─'):rep(40) }
+        for i = 2, 1000 do lines[i] = '行ごとのハイライトです。' end
+        local buf = buffer(lines)
+        local tree = vim.treesitter.get_parser(buf, 'markdown'):parse(true)[1]
+        local view = require('inkstone.request.view').new(buf)
+        view.ranges = { { 100, 102 }, { 800, 802 } }
+        local highlights = require('inkstone.request.highlights').new(buf, view)
+        local get_lines, read = vim.api.nvim_buf_get_lines, 0
+        vim.api.nvim_buf_get_lines = function(...)
+            local result = get_lines(...)
+            read = read + #result
+            return result
+        end
+        highlights:tree('markdown', tree:root())
+        vim.api.nvim_buf_get_lines = get_lines
+        equal(read, 6)
+        local rows = vim.tbl_keys(highlights.lines)
+        table.sort(rows)
+        equal(rows, { 100, 101, 102, 800, 801, 802 })
+        for _, row in ipairs(rows) do
+            local spell = {}
+            for _, group in ipairs(highlights.lines[row].groups) do
+                if group.highlight == '@spell.markdown' then spell[#spell + 1] = { group[1], group[2] } end
+            end
+            equal(spell, { { 0, #lines[row + 1] } })
+        end
+        vim.api.nvim_buf_delete(buf, { force = true })
+    end)
+
     test('paragraph wrapping preserves source newlines by default and joining is independent', function()
         local wrap = require('inkstone.text.paragraph').wrap
         local function row(text, hard) return { line = { { text, 'String' } }, hard = hard } end

@@ -10,12 +10,20 @@ function M.prefix(context, marks, node)
     -- Markdown row nodes may include their leading whitespace (ACP indents
     -- every transcript line). Virtual rows must retain it just like overlays.
     source = source and source:sub(1, node:col()) or ''
+    return M.row_prefix(context, marks, node.start_row, source)
+end
 
+---@param context render.md.request.Context
+---@param marks render.md.Mark[]
+---@param row integer
+---@param source string source prefix before the row's content
+---@return render.md.mark.Line
+function M.row_prefix(context, marks, row, source)
     local overlays = {} ---@type render.md.Mark[]
     for _, mark in ipairs(marks) do
         local opts = mark.opts
         if
-            mark.start_row == node.start_row
+            mark.start_row == row
             and mark.start_col < #source
             and opts.end_col
             and opts.end_col <= #source

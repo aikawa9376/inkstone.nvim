@@ -103,6 +103,19 @@ restores the complete rendered layout. Disabled anti-conceal keeps table/list/
 chart/paragraph/typography/formula views rendered even on their source rows.
 Source editing uses Neovim's normal wrap/nowrap behavior.
 
+With joining disabled, each paragraph source row keeps its own leading prefix
+and corresponding wrapping budget. A transcript banner at column zero and an
+indented body may share one Markdown paragraph; reusing its first row's prefix
+would shift one or the other when any row needs reflow. Row prefixes, budgets
+and indentation are part of the layout snapshot.
+
+`request/highlights.lua` projects multiline captures onto each intersecting
+visible row using that row's byte endpoints. The end column of a multiline
+capture cannot be used on its first row: it can land inside a UTF-8 character,
+splitting virtual highlight chunks into visible invalid-byte placeholders and
+inflating measured widths. Captures spanning disjoint views are deduplicated,
+and source line reads remain bounded to the visible ranges.
+
 `core/folds.lua` discovers code fences, callouts and paired details blocks in
 Markdown trees. It filters hidden child decorations and emits conceal/summary
 marks; explicit toggle state follows source edits via a separate extmark

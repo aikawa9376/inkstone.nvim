@@ -138,29 +138,34 @@ function Highlights:tree(language, root)
     if not query then
         return
     end
+    local sources, seen = {}, {}
     self.view:query(root, query, function(id, node, data)
-        local row, start_col, _, end_col = Highlights.range(id, data, node)
-        if data.conceal_lines then
-            self:add(row, { hidden = true })
+        local sr, sc, er, ec = Highlights.range(id, data, node)
+        local priority = Highlights.priority(id, data)
+        local key = table.concat({ id, node:id(), sr, sc, er, ec, priority,
+            tostring(data.conceal), tostring(data.conceal_lines) }, ':')
+        if seen[key] then return end
+        seen[key] = true
+        -- Capture columns belong to different rows for multiline nodes. Using
+        -- the final column on the first row can split a UTF-8 character and
+        -- turn a virtual highlight chunk into visible <e2>/<94>/<80> bytes.
+        local last = er - (ec == 0 and 1 or 0)
+        for _, range in ipairs(self.view.ranges) do
+            for row = math.max(sr, range[1]), math.min(last, range[2]) do
+                if not sources[row] then
+                    sources[row] = vim.api.nvim_buf_get_lines(self.buf, row, row + 1, false)[1] or ''
+                end
+                local start_col = row == sr and sc or 0
+                local end_col = row == er and ec or #sources[row]
+                if data.conceal_lines then self:add(row, { hidden = true }) end
+                if data.conceal then
+                    self:add(row, { conceal = { start_col, end_col,
+                        replacement = data.conceal, blocks = 1 } })
+                end
+                self:add(row, { group = { start_col, end_col, priority = priority,
+                    highlight = '@' .. query.captures[id] .. '.' .. language } })
+            end
         end
-        if data.conceal then
-            self:add(row, {
-                conceal = {
-                    start_col,
-                    end_col,
-                    replacement = data.conceal,
-                    blocks = 1,
-                },
-            })
-        end
-        self:add(row, {
-            group = {
-                start_col,
-                end_col,
-                priority = Highlights.priority(id, data),
-                highlight = '@' .. query.captures[id] .. '.' .. language,
-            },
-        })
     end)
 end
 

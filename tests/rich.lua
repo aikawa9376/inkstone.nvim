@@ -39,6 +39,54 @@ return function(test, equal, buffer)
         test(name, callback)
     end
 
+    test('paragraph reflow retains each transcript row prefix and complete UTF-8 chunks', function()
+        local header = '─ 󰭹 Codex 6.1 Sol High · 2026-10-29 11:58 ──────────────────'
+        local short = ' 分離しました。既定は次のとおりです。'
+        local long = ' ' .. ('長い本文も自然な文節で折り返して表示します。'):rep(8)
+        local original = { header, short, '', long, header, short, '', 'AFTER' }
+        local buf, render = setup(original, { paragraph = { wrap = true, join = false } })
+        local env = require('inkstone.lib.env')
+        local context_width = env.win.width
+        env.win.width = function() return 60 end
+        local marks, ctx = render()
+        env.win.width = context_width
+        local actual = {}
+        for _, mark in ipairs(marks) do
+            assert(not mark.replace or mark.start_row ~= 0, 'fitting header/body must retain source rows')
+            for _, line in ipairs(mark.replace or {}) do
+                local chunks = {}
+                for _, chunk in ipairs(line) do
+                    for _, cluster in ipairs(require('inkstone.text.grapheme').split(chunk[1])) do
+                        assert(cluster:byte() < 128 or #cluster > 1,
+                            'a highlight boundary split a UTF-8 character')
+                    end
+                    chunks[#chunks + 1] = chunk[1]
+                end
+                local text = table.concat(chunks)
+                assert(vim.fn.strdisplaywidth(text) <= 60, vim.inspect({ text, vim.fn.strdisplaywidth(text), line }))
+                actual[#actual + 1] = text
+            end
+        end
+        local expected = {}
+        for _, source in ipairs({ long, header, short }) do
+            local prefix = source:match('^ *')
+            for _, line in ipairs(require('inkstone.text').wrap(source:sub(#prefix + 1), 60 - #prefix)) do
+                expected[#expected + 1] = prefix .. line
+            end
+        end
+        equal(actual, expected)
+        for row, source in ipairs({ header, short }) do
+            local spell
+            for _, group in ipairs(ctx.highlights:line(row - 1).groups) do
+                if group.highlight == '@spell.markdown' then spell = group end
+            end
+            assert(spell)
+            equal({ spell[1], spell[2] }, { 0, #source })
+        end
+        equal(vim.api.nvim_buf_get_lines(buf, 0, -1, false), original)
+        vim.api.nvim_buf_delete(buf, { force = true })
+    end)
+
     test('tables cycle through cards and charts while source and anchors survive edits', function()
         local lines = { 'BEFORE', '', '| 項目 | before | after |', '| --- | --- | --- |',
             '| 日本語 | 20ms | 10ms |', '| emoji 👩‍💻 | 40ms | 30ms |', '', 'AFTER' }

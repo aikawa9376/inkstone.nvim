@@ -61,9 +61,11 @@ function Render:reflow(margin, indent)
     for _, formula in ipairs(self.context.latex:get()) do
         if formula.start_row >= node.start_row and formula.start_row <= node.end_row then return false end
     end
-    local prefix = self:indent():line(true):extend(display.prefix(self.context, self.marks:get(), node))
+    local section_indent = self:indent():line(true)
+    local prefix = section_indent:copy():extend(display.prefix(self.context, self.marks:get(), node))
+    local window_width = self.context:window_width()
     local available = self.config.wrap
-        and (self.context:window_width() - prefix:width() - margin - indent) or math.huge
+        and (window_width - prefix:width() - margin - indent) or math.huge
     if available < 2 then return false end
     local cache = require('inkstone.lib.layout_cache')
     local inputs = {}
@@ -92,7 +94,14 @@ function Render:reflow(margin, indent)
             }
             local highlights = self.context.highlights:line(row)
             local inline = self.context.inline:get(body, true)
-            bodies[#bodies + 1] = { body = body, hard = hard }
+            local row_prefix = self.config.join and prefix or section_indent:copy():extend(
+                display.row_prefix(self.context, self.marks:get(), row, text:sub(1, start)))
+            local row_indent = i == 1 and indent or 0
+            local row_available = self.config.join and available or (self.config.wrap
+                and (window_width - row_prefix:width() - margin - row_indent) or math.huge)
+            if row_available < 2 then return false end
+            bodies[#bodies + 1] = { body = body, hard = hard, prefix = row_prefix,
+                indent = row_indent, available = row_available }
             -- Arrays keep the snapshot canonical: map iteration order is not a
             -- stable cache key. Include custom handler highlights/insertions.
             local groups, conceals, insertions = {}, {}, {}
@@ -103,7 +112,8 @@ function Render:reflow(margin, indent)
                 conceals[#conceals + 1] = { conceal[1], conceal[2], conceal.replacement, conceal.blocks }
             end
             for _, value in ipairs(inline) do insertions[#insertions + 1] = { value.col, value.line } end
-            inputs[#inputs + 1] = { row, start, stop, body.text, hard, groups, conceals, insertions }
+            inputs[#inputs + 1] = { row, start, stop, body.text, hard, groups, conceals, insertions,
+                row_prefix:get(), row_available, row_indent }
             bytes = bytes + #body.text * 64 + #highlights.groups * 128 + #highlights.conceals * 128
         end
     end
@@ -117,23 +127,34 @@ function Render:reflow(margin, indent)
         self.marks:replace(self.config, node, cached)
         return true
     end
-    local rows, maximum = {}, 0
+    local rows, needs_layout = {}, self.config.join and #bodies > 1
     local Parser = require('inkstone.parser.table')
     for _, value in ipairs(bodies) do
         local line = display.line(self.context, value.body)
         local units = Parser.units(line)
         local _, minimum = Parser.measure(units)
-        if minimum > available then return false end
-        maximum = math.max(maximum, str.line_width(line))
-        rows[#rows + 1] = { line = line, units = units, hard = value.hard }
+        if minimum > value.available then return false end
+        needs_layout = needs_layout or str.line_width(line) > value.available
+        rows[#rows + 1] = { line = line, units = units, hard = value.hard,
+            prefix = value.prefix, indent = value.indent, available = value.available }
     end
-    if #rows == 0 or ((#rows == 1 or not self.config.join) and maximum <= available) then
+    if #rows == 0 or not needs_layout then
         cache.put(self.context.buf, key, input, false, bytes)
         return false
     end
-    local wrapped = require('inkstone.text.paragraph').wrap(rows, available, self.config.japanese, self.config.join)
-    for i, line in ipairs(wrapped) do
-        wrapped[i] = prefix:copy():pad(margin + (i == 1 and indent or 0)):extend(line):get()
+    local paragraph = require('inkstone.text.paragraph')
+    local wrapped = {}
+    if self.config.join then
+        wrapped = paragraph.wrap(rows, available, self.config.japanese, true)
+        for i, line in ipairs(wrapped) do
+            wrapped[i] = prefix:copy():pad(margin + (i == 1 and indent or 0)):extend(line):get()
+        end
+    else
+        for _, row in ipairs(rows) do
+            for i, line in ipairs(paragraph.wrap({ row }, row.available, self.config.japanese)) do
+                wrapped[#wrapped + 1] = row.prefix:copy():pad(margin + (i == 1 and row.indent or 0)):extend(line):get()
+            end
+        end
     end
     cache.put(self.context.buf, key, input, wrapped, bytes)
     self.marks:replace(self.config, node, wrapped)
