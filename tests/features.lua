@@ -129,14 +129,62 @@ return function(test, equal, buffer)
         vim.api.nvim_buf_delete(buf, { force = true })
     end)
 
+    test('paragraph wrapping preserves source newlines by default and joining is independent', function()
+        local wrap = require('inkstone.text.paragraph').wrap
+        local function row(text, hard) return { line = { { text, 'String' } }, hard = hard } end
+        equal(wrap({ row('日本語'), row('の段落'), row('English'), row('words') }, 40), {
+            { { '日本語', 'String' } }, { { 'の段落', 'String' } },
+            { { 'English', 'String' } }, { { 'words', 'String' } },
+        })
+        local first = ('今日は天気がいいから散歩しましょう。'):rep(12)
+        local second = ('長い文章も意味のまとまりで折り返します。'):rep(12)
+        local last = 'ここは次の行です。'
+        local original = { 'BEFORE', '', first, second, last, '', 'AFTER' }
+        local buf, parser, ctx, marks = parse(original)
+        equal(ctx.config.paragraph.wrap, true)
+        equal(ctx.config.paragraph.join, false)
+        local function rows(marks)
+            local result = {}
+            for _, mark in ipairs(marks) do
+                for _, line in ipairs(mark.replace or {}) do
+                    local text = {}; for _, chunk in ipairs(line) do text[#text + 1] = chunk[1] end
+                    result[#result + 1] = table.concat(text)
+                end
+            end
+            return result
+        end
+        local width = ctx:window_width()
+        local expected = {}
+        for _, source in ipairs({ first, second, last }) do
+            vim.list_extend(expected, require('inkstone.text').wrap(source, width))
+        end
+        equal(rows(marks), expected)
+        local function render()
+            local fresh = Context.new(buf, vim.api.nvim_get_current_win(), require('inkstone.state').get(buf))
+            fresh.view.ranges = { { 0, #original } }
+            return require('inkstone.core.handlers').run(fresh, parser)
+        end
+        -- Change only display settings: cache results must follow both flags.
+        ctx.config.paragraph.join = true
+        equal(rows(render()), require('inkstone.text').wrap(first .. second .. last, width))
+        ctx.config.paragraph.wrap = false
+        equal(rows(render()), { first .. second .. last })
+        ctx.config.paragraph.join = false
+        equal(rows(render()), {})
+        ctx.config.paragraph.wrap = true
+        equal(rows(render()), expected)
+        equal(vim.api.nvim_buf_get_lines(buf, 0, -1, false), original)
+        vim.api.nvim_buf_delete(buf, { force = true })
+    end)
+
     test('paragraph reflow joins soft breaks and retains hard breaks and highlights', function()
         local wrap = require('inkstone.text.paragraph').wrap
         local function row(s, hard) return { line = { { s, 'String' } }, hard = hard } end
-        equal(wrap({ row('日本語'), row('の段落'), row('です。', true), row('English'), row('words') }, 40), {
+        equal(wrap({ row('日本語'), row('の段落'), row('です。', true), row('English'), row('words') }, 40, {}, true), {
             { { '日本語の段落です。', 'String' } }, { { 'English words', 'String' } },
         })
         local original = { 'BEFORE', '', ' 日本語の段落を', ' 文節で折り返します。  ', ' English words follow.', '', 'AFTER' }
-        local buf, _, _, marks = parse(original)
+        local buf, _, _, marks = parse(original, { paragraph = { join = true } })
         local replacement
         for _, mark in ipairs(marks) do if mark.replace then replacement = mark; break end end
         assert(replacement)

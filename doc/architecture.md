@@ -84,9 +84,12 @@ Widths use Neovim's display-width function. Table wrapping preserves inline
 highlight segments while rebuilding virtual rows; `inkstone.text` exposes the
 same layout without changing a source buffer.
 
-Top-level paragraphs use `text/paragraph.lua` to join soft breaks, preserve hard
-breaks and wrap rendered inline chunks with the same Japanese layout kernel.
-`paragraph.wrap` is enabled by default. Lists/quotes, image anchors and converted
+Top-level paragraphs use `text/paragraph.lua` to wrap rendered inline chunks
+with the same Japanese layout kernel. `paragraph.wrap` defaults to true and
+`paragraph.join` to false, preserving source newlines while wrapping each long
+line independently. Explicit joining combines soft breaks but retains hard
+breaks; it can also run with wrapping disabled. Both flags participate in the
+paragraph layout cache key. Lists/quotes, image anchors and converted
 math retain their existing layout. Anti-conceal overlapping a replaced source
 row restores the complete paragraph; disabling it retains the rendered view.
 `Marks:replace` translates half-open

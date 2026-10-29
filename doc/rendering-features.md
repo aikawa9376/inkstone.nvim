@@ -15,15 +15,18 @@ whole layout. `disabled_modes` and normal `render_modes` still apply.
 require('inkstone').setup({
     paragraph = {
         wrap = true,
+        join = false, -- preserve source newlines; true joins soft newlines
         japanese = { enabled = true, budoux = true },
     },
 })
 ```
 
 Top-level paragraphs use the available window width, bundled BudouX phrase
-boundaries and basic kinsoku rules. Soft source newlines join with a space for
-English; adjacent CJK text joins without adding a space. Two trailing spaces or
-a trailing backslash preserve an explicit line break. Inline highlights, links
+boundaries and basic kinsoku rules. Source newlines stay separate by default;
+each long source line wraps independently. Set `paragraph.join = true` to join
+soft source newlines with a space for English, or without an added space between
+adjacent CJK text. Two trailing spaces or a trailing backslash always preserve
+an explicit line break. Inline highlights, links
 and inline code keep their rendered decorations. Width and layout are rebuilt
 on resize. With anti-conceal enabled, the original paragraph returns when its
 source overlaps the configured cursor range; leaving it restores the layout.
@@ -31,7 +34,9 @@ With anti-conceal disabled the layout stays visible under the cursor.
 The side preview can show the rendered paragraph while the source is
 being edited.
 
-`paragraph.wrap = false` restores the previous Neovim wrapping behavior.
+`wrap` and `join` are independent. `wrap = false, join = true` joins soft source
+lines without wrapping the virtual output to the window width. With both false,
+paragraphs use Neovim's ordinary source wrapping. `join` is false by default.
 Paragraphs inside lists and quotes retain their existing layout. Paragraphs
 containing image anchors or externally converted math retain source-row layout
 so their image/math placements remain anchored correctly. Very narrow windows

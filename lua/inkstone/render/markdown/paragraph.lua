@@ -21,7 +21,7 @@ function Render:setup()
     end
     local margin = self:get_number(self.config.left_margin)
     local indent = self:get_number(self.config.indent)
-    if margin <= 0 and indent <= 0 and not self.config.wrap then
+    if margin <= 0 and indent <= 0 and not self.config.wrap and not self.config.join then
         return false
     end
     self.data = { margin = margin, indent = indent }
@@ -53,7 +53,7 @@ end
 -- Source rows remain searchable/yankable. The UI restores the entire paragraph
 -- when anti_conceal includes its source; disabled anti_conceal keeps the layout.
 function Render:reflow(margin, indent)
-    if not self.config.wrap or self.context.conceal.level < 2
+    if (not self.config.wrap and not self.config.join) or self.context.conceal.level < 2
         or not require('inkstone.lib.compat').has_11 then return false end
     local node = self.node
     -- Math rendering owns multiline virtual layout and source positioning.
@@ -62,12 +62,13 @@ function Render:reflow(margin, indent)
         if formula.start_row >= node.start_row and formula.start_row <= node.end_row then return false end
     end
     local prefix = self:indent():line(true):extend(display.prefix(self.context, self.marks:get(), node))
-    local available = self.context:window_width() - prefix:width() - margin - indent
+    local available = self.config.wrap
+        and (self.context:window_width() - prefix:width() - margin - indent) or math.huge
     if available < 2 then return false end
     local cache = require('inkstone.lib.layout_cache')
     local inputs = {}
     local input = {
-        available, margin, indent, prefix:get(),
+        available, margin, indent, prefix:get(), self.config.wrap, self.config.join,
         { self.config.japanese.enabled, self.config.japanese.budoux }, self.context.config.padding.highlight,
         self.context.conceal.level, vim.bo[self.context.buf].tabstop,
         vim.bo[self.context.buf].vartabstop, vim.o.ambiwidth, vim.o.display, inputs,
@@ -126,11 +127,11 @@ function Render:reflow(margin, indent)
         maximum = math.max(maximum, str.line_width(line))
         rows[#rows + 1] = { line = line, units = units, hard = value.hard }
     end
-    if #rows == 0 or (#rows == 1 and maximum <= available) then
+    if #rows == 0 or ((#rows == 1 or not self.config.join) and maximum <= available) then
         cache.put(self.context.buf, key, input, false, bytes)
         return false
     end
-    local wrapped = require('inkstone.text.paragraph').wrap(rows, available, self.config.japanese)
+    local wrapped = require('inkstone.text.paragraph').wrap(rows, available, self.config.japanese, self.config.join)
     for i, line in ipairs(wrapped) do
         wrapped[i] = prefix:copy():pad(margin + (i == 1 and indent or 0)):extend(line):get()
     end

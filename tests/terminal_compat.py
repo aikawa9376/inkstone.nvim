@@ -198,8 +198,40 @@ class TerminalTests(unittest.TestCase):
         self.assertTrue(all(row == bars[0] for row in bars), (bars, self.visible_text()))
         self.assert_source()
 
+    def test_paragraph_wrap_preserves_newlines_and_join_is_opt_in(self):
+        self.render(['BEFORE', '', '**FIRST_LINE**', 'SECOND_LINE',
+                     '今日は天気がいいから散歩しましょう。長い日本語の文章を文節で折り返します。' * 6,
+                     '', 'AFTER'], conceallevel=3, anti_conceal=True)
+        lines = [line.strip() for line in self.visible_text().splitlines()]
+        self.assertIn('FIRST_LINE', lines)
+        self.assertIn('SECOND_LINE', lines)
+        self.assertIn('AFTER', lines)
+        self.assertNotIn('**', self.visible_text())
+        self.lua("require('inkstone.state').get(vim.api.nvim_get_current_buf()).paragraph.join=true; "
+                 "require('inkstone.api').render({buf=vim.api.nvim_get_current_buf()}); vim.wait(100)")
+        self.pump()
+        self.assertIn('FIRST_LINE SECOND_LINE', self.visible_text())
+        self.lua("require('inkstone.state').get(vim.api.nvim_get_current_buf()).paragraph.join=false; "
+                 "require('inkstone.api').render({buf=vim.api.nvim_get_current_buf()}); vim.wait(100)")
+        self.pump()
+        self.assertIn('SECOND_LINE', [line.strip() for line in self.visible_text().splitlines()])
+        self.lua("vim.api.nvim_win_set_cursor(0,{4,0}); "
+                 "require('inkstone.api').render({buf=vim.api.nvim_get_current_buf()}); vim.wait(100)")
+        self.pump()
+        self.assertEqual(self.lua("local d=require('inkstone.core.ui').cache[vim.api.nvim_get_current_buf()]; "
+                                 "local n=0; for _,m in ipairs(d:get()) do "
+                                 "if m:get().replace and m:shown() then n=n+1 end end; print(n)"), '0')
+        self.lua("vim.api.nvim_win_set_cursor(0,{3,0}); "
+                 "require('inkstone.api').render({buf=vim.api.nvim_get_current_buf()}); vim.wait(100)")
+        self.pump()
+        self.assertIn('**FIRST_LINE**', self.visible_text())
+        self.assert_source()
+
     def test_paragraph_reflow_and_cursor_restore(self):
         self.render(['BEFORE', '', ' 日本語の**段落**を', ' 文節で折り返します。  ', ' English words follow.', '', 'AFTER'], conceallevel=3, anti_conceal=True)
+        self.lua("require('inkstone.state').get(vim.api.nvim_get_current_buf()).paragraph.join=true; "
+                 "require('inkstone.api').render({buf=vim.api.nvim_get_current_buf()}); vim.wait(100)")
+        self.pump()
         text = self.visible_text()
         self.assertIn('日本語の段落を文節で折り返します。', text)
         self.assertNotIn('**', text)

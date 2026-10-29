@@ -1613,6 +1613,7 @@ M.paragraph = {}
 
 ---@class (exact) render.md.paragraph.Config: render.md.base.Config
 ---@field wrap boolean
+---@field join boolean
 ---@field japanese { enabled: boolean, budoux: boolean }
 ---@field left_margin render.md.paragraph.Number
 ---@field indent render.md.paragraph.Number
@@ -1645,8 +1646,10 @@ M.paragraph.default = {
     indent = 0,
     -- Minimum width to use for paragraphs.
     min_width = 0,
-    -- Rebuild soft-wrapped paragraphs without changing source bytes.
+    -- Wrap long source lines without changing source bytes.
     wrap = true,
+    -- Join soft source newlines before layout; hard Markdown breaks remain.
+    join = false,
     japanese = { enabled = true, budoux = true },
 }
 
@@ -1657,6 +1660,7 @@ function M.paragraph.schema()
         indent = { union = { { type = 'number' }, { type = 'function' } } },
         min_width = { type = 'number' },
         wrap = { type = 'boolean' },
+        join = { type = 'boolean' },
         japanese = { record = {
             enabled = { type = 'boolean' },
             budoux = { type = 'boolean' },

@@ -10,7 +10,7 @@ SETUP
       wrap = true,
       japanese = { enabled = true, budoux = true },
     },
-    paragraph = { wrap = true, japanese = { enabled = true, budoux = true } },
+    paragraph = { wrap = true, join = false, japanese = { enabled = true, budoux = true } },
   })
 <
 BudouX is bundled and runs offline. Japanese table wrapping prefers phrase
@@ -26,10 +26,12 @@ LUA API
   local lines = text.wrap('「日本語」の表を、読みやすく。', 12)
 <
 The API returns strings without editing any buffer. Width follows Neovim's
-strdisplaywidth(). Top-level paragraphs use this layout by default. Soft source
-newlines join; explicit Markdown hard breaks remain. With anti_conceal enabled,
-its cursor range restores the whole source paragraph. Set paragraph.wrap=false
-for Neovim's ordinary wrapping.
+strdisplaywidth(). Top-level paragraphs use this layout by default. Source
+newlines are preserved and each long line wraps independently. Set
+paragraph.join=true to join soft source newlines; explicit Markdown hard breaks
+always remain. With anti_conceal enabled, its cursor range restores the whole
+source paragraph. The wrap and join flags are independent; both false use
+Neovim's ordinary source wrapping. Defaults are wrap=true, join=false.
 
 Tables with wrapped replacement rows restore the whole source table when
 anti_conceal's cursor range overlaps it. Borders and inline decorations return

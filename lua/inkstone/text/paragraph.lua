@@ -2,9 +2,10 @@ local Parser = require('inkstone.parser.table')
 local layout = require('inkstone.text.layout')
 local M = {}
 
--- Join CommonMark soft breaks. CJK neighbours do not gain an ASCII space.
--- A hard break starts a fresh wrapping group.
-function M.wrap(rows, width, options)
+-- Preserve source newlines unless joining is explicitly requested. Joined
+-- CJK neighbours do not gain an ASCII space; hard breaks always remain.
+---@param join? boolean
+function M.wrap(rows, width, options, join)
     local result, units = {}, {}
     local function flush()
         vim.list_extend(result, layout.wrap(units, width, options))
@@ -17,7 +18,7 @@ function M.wrap(rows, width, options)
             units[#units + 1] = { text = ' ', width = 1, highlight = previous.highlight }
         end
         vim.list_extend(units, next_units)
-        if row.hard or i == #rows then flush() end
+        if not join or row.hard or i == #rows then flush() end
     end
     return result
 end
