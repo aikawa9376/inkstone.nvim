@@ -207,6 +207,60 @@ return function(test, equal, buffer)
         vim.api.nvim_buf_delete(buf, { force = true })
     end)
 
+    test('replacement rows retain foreign range highlights without importing old renderer marks', function()
+        local original = { '─ Assistant ' .. ('─'):rep(12), ('日本語の本文です。'):rep(15), '', 'AFTER' }
+        local buf, parser, ctx = parse(original)
+        local foreign = vim.api.nvim_create_namespace('lazyagent-test-transcript')
+        vim.api.nvim_buf_set_extmark(buf, foreign, 0, 0, {
+            end_col = #original[1], hl_group = 'DiagnosticInfo', priority = 200,
+        })
+        vim.api.nvim_buf_set_extmark(buf, foreign, 0, 4, {
+            end_row = 1, end_col = #'日本語', hl_group = 'Special', priority = 250,
+        })
+        vim.api.nvim_buf_set_extmark(buf, vim.api.nvim_create_namespace('inkstone.nvim'), 0, 0, {
+            end_col = #original[1], hl_group = 'Error', priority = 300,
+        })
+        local function render()
+            ctx = Context.new(buf, vim.api.nvim_get_current_win(), ctx.config)
+            ctx._width = 30
+            return require('inkstone.core.handlers').run(ctx, parser)
+        end
+        local function styled(marks, target)
+            local result = {}
+            for _, mark in ipairs(marks) do
+                for _, line in ipairs(mark.replace or {}) do
+                    for _, chunk in ipairs(line) do
+                        local groups = type(chunk[2]) == 'table' and chunk[2] or { chunk[2] }
+                        assert(not vim.tbl_contains(groups, 'Error'), 'previous renderer styles leaked')
+                        if vim.tbl_contains(groups, target) then result[#result + 1] = chunk[1] end
+                    end
+                end
+            end
+            return table.concat(result)
+        end
+        equal(styled(render(), 'DiagnosticInfo'), original[1])
+        assert(styled(render(), 'Special'):find('日本語', 1, true))
+        -- External changes must invalidate the layout even without a text edit.
+        vim.api.nvim_buf_clear_namespace(buf, foreign, 0, -1)
+        equal(styled(render(), 'DiagnosticInfo'), '')
+        -- A range starting outside the viewport must still contribute there.
+        vim.api.nvim_buf_set_extmark(buf, foreign, 0, 0, {
+            end_row = 3, end_col = 0, hl_group = 'DiagnosticWarn', priority = 200,
+        })
+        vim.treesitter.stop(buf)
+        local view = { ranges = { { 1, 1 }, { 3, 3 } } }
+        local highlights = require('inkstone.request.highlights').new(buf, view)
+        equal(highlights:line(1).groups, { { 0, #original[2], priority = 200, highlight = 'DiagnosticWarn' } })
+        equal(highlights:line(3).groups, {})
+        vim.api.nvim_buf_clear_namespace(buf, foreign, 0, -1)
+        vim.api.nvim_buf_set_extmark(buf, foreign, 1, 0, {
+            end_col = #'日本語', hl_eol = true, hl_group = 'Special', priority = 200,
+        })
+        highlights = require('inkstone.request.highlights').new(buf, view)
+        equal(highlights:line(1).groups, { { 0, #'日本語', priority = 200, highlight = 'Special' } })
+        vim.api.nvim_buf_delete(buf, { force = true })
+    end)
+
     test('paragraph reflow joins soft breaks and retains hard breaks and highlights', function()
         local wrap = require('inkstone.text.paragraph').wrap
         local function row(s, hard) return { line = { { s, 'String' } }, hard = hard } end

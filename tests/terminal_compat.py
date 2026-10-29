@@ -207,6 +207,12 @@ class TerminalTests(unittest.TestCase):
         short = ' 分離しました。既定は次のとおりです。'
         body = ' ' + '長い本文も自然な文節で折り返して表示します。' * 4
         self.render([header, short, '', body, header, short, '', 'AFTER'], conceallevel=3)
+        self.lua("vim.api.nvim_set_hl(0,'TranscriptHeader',{fg=0x123456,bold=true}); "
+                 "local ns=vim.api.nvim_create_namespace('lazyagent-test-transcript'); "
+                 "for _,r in ipairs({0,4}) do local s=vim.api.nvim_buf_get_lines(0,r,r+1,false)[1]; "
+                 "vim.api.nvim_buf_set_extmark(0,ns,r,0,{end_col=#s,hl_group='TranscriptHeader',priority=200}) end; "
+                 "require('inkstone.api').render({buf=vim.api.nvim_get_current_buf()}); vim.wait(100); vim.cmd('redraw!')")
+        self.pump()
 
         def check_columns():
             rows = [str(self.screen.line(row)).rstrip() for row in range(24)]
@@ -217,6 +223,11 @@ class TerminalTests(unittest.TestCase):
             self.assertNotIn('<94>', self.visible_text())
             self.assertNotIn('<80>', self.visible_text())
             self.assertIn('AFTER', rows)
+            for row, text in enumerate(rows):
+                if text == header:
+                    cell = self.screen.line(row).cursor_from(0)
+                    self.assertEqual(cell.fg, (0x123456 << 8) | 2)
+                    self.assertTrue(cell.bold)
 
         check_columns()
         for cursor in ((4, 0), (6, 0), (1, 0)):
@@ -1084,6 +1095,38 @@ class TerminalTests(unittest.TestCase):
         self.pump(.4)
         self.assertTrue(enlarged(), self.visible_text())
         self.assertTrue(all(col >= 35 for _, col in enlarged()), enlarged())
+        self.assert_source()
+
+    def test_popup_bottom_border_occludes_scaled_heading(self):
+        self.tmux('set-option', '-g', 'allow-passthrough', 'on')
+        self.render(['BEFORE', '', '', '', '# Heading', '', 'BODY'])
+        self.lua("vim.env.KITTY_WINDOW_ID='1'; require('inkstone.api').render({buf=vim.api.nvim_get_current_buf()}); "
+                 "vim.wait(300); vim.cmd('redraw!')")
+        self.pump(.4)
+        self.assertEqual(self.lua("print(#require('inkstone.core.typography').drawn)"), '1')
+        self.lua("local r=require('inkstone.core.typography').drawn[1]; "
+                 "_G.cover=vim.api.nvim_open_win(vim.api.nvim_create_buf(false,true),false,"
+                 "{relative='editor',row=r.screen_row-3,col=r.screen_col-1,width=30,height=1,"
+                 "style='minimal',border='single'}); "
+                 "vim.api.nvim_buf_set_lines(vim.api.nvim_win_get_buf(_G.cover),0,-1,false,{'POPUP'}); vim.cmd('redraw!')")
+        self.pump(.4)
+        self.assertIn('POPUP', self.visible_text())
+        self.assertEqual(self.lua("print(#require('inkstone.core.typography').drawn)"), '0',
+                         'the bottom border covers the heading lead row')
+        self.assertFalse(any(cell.get('mcd') for row in range(24) for cell in self.screen.cpu_cells(row)))
+        self.lua("vim.api.nvim_win_close(_G.cover,true); vim.cmd('redraw!')")
+        self.pump(.3)
+        self.assertEqual(self.lua("print(#require('inkstone.core.typography').drawn)"), '1')
+        # A borderless popup just above the glyph must not hide it. Count
+        # actual border sides instead of assuming two extra cells everywhere.
+        self.lua("local r=require('inkstone.core.typography').drawn[1]; "
+                 "_G.cover=vim.api.nvim_open_win(vim.api.nvim_create_buf(false,true),false,"
+                 "{relative='editor',row=r.screen_row-2,col=r.screen_col-1,width=30,height=1,"
+                 "style='minimal',border='none'}); vim.cmd('redraw!')")
+        self.pump(.3)
+        self.assertEqual(self.lua("print(#require('inkstone.core.typography').drawn)"), '1')
+        self.lua("vim.api.nvim_win_close(_G.cover,true); vim.cmd('redraw!')")
+        self.pump(.2)
         self.assert_source()
 
     def test_old_kitty_keeps_native_text(self):

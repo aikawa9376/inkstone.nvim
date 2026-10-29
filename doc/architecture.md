@@ -116,6 +116,15 @@ splitting virtual highlight chunks into visible invalid-byte placeholders and
 inflating measured widths. Captures spanning disjoint views are deduplicated,
 and source line reads remain bounded to the visible ranges.
 
+Replacement chunks also carry persistent foreign extmark range highlights,
+including LazyAgent transcript role colors. `Highlights:extmarks` queries only
+visible ranges with overlap enabled, clips multiline byte ranges per row, and
+orders them with Tree-sitter captures by priority. It excludes Inkstone's own
+namespaces to avoid importing previous render output. These styles participate
+in paragraph layout snapshots, so a refreshed render sees external decoration
+changes even when source text has not changed. Ephemeral decorations and
+window-only matches are not captured.
+
 `core/folds.lua` discovers code fences, callouts and paired details blocks in
 Markdown trees. It filters hidden child decorations and emits conceal/summary
 marks; explicit toggle state follows source edits via a separate extmark
@@ -222,6 +231,11 @@ a no-op for placements. Changed geometry/content/entry sets erase only owned
 extents before native redraw. Command-line height changes preserve still-visible
 lines when their origin and width are unchanged. Floats and popup menus erase
 only intersecting lines before they draw, never the rest of the page.
+Floating window positions are zero-based outer corners; convert them to the
+one-based screen coordinates used by placements before testing intersections.
+Their bounds include only nonempty border sides returned by the window config.
+Otherwise a popup's bottom/right border can be repainted by enlarged glyphs,
+while borderless floats can incorrectly suppress adjacent headings.
 Every completed Neovim redraw schedules one coalesced replay of visible,
 uncovered placements after the native grid flush. Native output can overwrite
 multicells with identical blank cells, including composed/virtual rows without

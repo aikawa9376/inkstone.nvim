@@ -401,8 +401,19 @@ end
 
 local function float_rect(win)
     local pos = vim.api.nvim_win_get_position(win)
-    return { win = win, row = pos[1], col = pos[2],
-        height = vim.api.nvim_win_get_height(win) + 2, width = vim.api.nvim_win_get_width(win) + 2 }
+    local cfg = vim.api.nvim_win_get_config(win)
+    local border = cfg.border
+    local function edge(index)
+        if type(border) ~= 'table' or #border == 0 then return 0 end
+        local char = border[(index - 1) % #border + 1]
+        if type(char) == 'table' then char = char[1] end
+        return char ~= '' and 1 or 0
+    end
+    -- Window positions include the border and are zero-based; screenpos and
+    -- our overlay rectangles are one-based. Count only the actual border sides.
+    return { win = win, row = pos[1] + 1, col = pos[2] + 1,
+        height = vim.api.nvim_win_get_height(win) + edge(2) + edge(6),
+        width = vim.api.nvim_win_get_width(win) + edge(4) + edge(8) }
 end
 
 local function blockers()

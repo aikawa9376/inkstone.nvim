@@ -112,6 +112,7 @@ end
 ---Cached row level implementation of vim.treesitter.get_captures_at_pos
 ---@private
 function Highlights:compute()
+    self:extmarks()
     if not vim.treesitter.highlighter.active[self.buf] then
         return
     end
@@ -122,6 +123,40 @@ function Highlights:compute()
     self.view:each_tree(parser, function(tree, language_tree)
         self:tree(language_tree:lang(), tree:root())
     end)
+end
+
+-- Replacement rows cannot inherit decorations from the concealed source.
+-- Snapshot foreign range highlights alongside captures, excluding our previous
+-- render so refreshing a layout never feeds its own styles back into it.
+function Highlights:extmarks()
+    local owned, seen = {}, {}
+    for name, id in pairs(vim.api.nvim_get_namespaces()) do
+        if name:match('^inkstone[%.:]') then owned[id] = true end
+    end
+    local sources = {}
+    for _, range in ipairs(self.view.ranges) do
+        local marks = vim.api.nvim_buf_get_extmarks(self.buf, -1, { range[1], 0 }, { range[2], -1 },
+            { details = true, overlap = true, type = 'highlight' })
+        for _, mark in ipairs(marks) do
+            local sr, sc, opts = mark[2], mark[3], mark[4]
+            local key = opts.ns_id .. ':' .. mark[1]
+            if not owned[opts.ns_id] and not opts.invalid and opts.hl_group and not seen[key] then
+                seen[key] = true
+                local er, ec = opts.end_row or sr, opts.end_col or sc
+                local last = er - (ec == 0 and er > sr and 1 or 0)
+                for _, visible in ipairs(self.view.ranges) do
+                    for row = math.max(sr, visible[1]), math.min(last, visible[2]) do
+                        if not sources[row] then
+                            sources[row] = vim.api.nvim_buf_get_lines(self.buf, row, row + 1, false)[1] or ''
+                        end
+                        self:add(row, { group = { row == sr and sc or 0,
+                            row == er and math.min(ec, #sources[row]) or #sources[row],
+                            priority = opts.priority or 0, highlight = opts.hl_group } })
+                    end
+                end
+            end
+        end
+    end
 end
 
 ---@private
