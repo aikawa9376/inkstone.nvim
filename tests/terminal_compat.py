@@ -851,6 +851,63 @@ class TerminalTests(unittest.TestCase):
         self.assertEqual(self.lua('print(vim.wo.cursorline)'), 'false')
         self.assert_source()
 
+    def test_shared_buffer_split_uses_native_text_and_recovers_after_close(self):
+        self.tmux('set-option', '-g', 'allow-passthrough', 'on')
+        self.render(['BEFORE', '', '# FIRST', '', 'BODY', '', '<small>DETAIL</small>', '', 'AFTER'])
+        self.lua("vim.env.KITTY_WINDOW_ID='1'; require('inkstone.core.manager').init(); "
+                 "require('inkstone.core.manager').attach(vim.api.nvim_get_current_buf()); "
+                 "require('inkstone.api').render({buf=vim.api.nvim_get_current_buf()}); vim.wait(200)")
+        self.pump(.2)
+        self.assertIn('FIRST', self.scaled_text())
+        self.lua("_G.owner=vim.api.nvim_get_current_win(); vim.cmd('vsplit'); "
+                 "_G.sibling=vim.api.nvim_get_current_win(); vim.wait(300); vim.cmd('redraw!')")
+        self.pump(.3)
+        self.assertEqual(self.visible_text().count('FIRST'), 2, self.visible_text())
+        self.assertEqual(self.visible_text().count('DETAIL'), 2, self.visible_text())
+        self.assertEqual(self.lua("print(#require('inkstone.core.typography').drawn)"), '0')
+        # The same policy covers a floating view with no resize of its owner.
+        self.lua("vim.api.nvim_win_close(_G.sibling,true); vim.wait(300); vim.cmd('redraw!')")
+        self.pump(.3)
+        self.assertIn('FIRST', self.scaled_text())
+        self.lua("_G.sibling=vim.api.nvim_open_win(vim.api.nvim_get_current_buf(),false,"
+                 "{relative='editor',row=0,col=65,width=45,height=12,style='minimal',border='single'}); "
+                 "vim.wait(300); vim.cmd('redraw!')")
+        self.pump(.3)
+        self.assertEqual(self.visible_text().count('FIRST'), 2, self.visible_text())
+        self.assertEqual(self.visible_text().count('DETAIL'), 2, self.visible_text())
+        self.lua("vim.api.nvim_win_close(_G.sibling,true); vim.wait(300); vim.cmd('redraw!')")
+        self.pump(.3)
+        self.assertIn('FIRST', self.scaled_text())
+        # A hidden tab shares the same buffer decorations, too.
+        self.lua("vim.cmd('tab split'); vim.wait(300); vim.cmd('redraw!')")
+        self.pump(.3)
+        self.assertIn('FIRST', self.visible_text())
+        self.assertEqual(self.lua("print(#require('inkstone.core.typography').drawn)"), '0')
+        self.lua("vim.cmd('tabclose'); vim.wait(300); vim.cmd('redraw!')")
+        self.pump(.3)
+        self.assertIn('FIRST', self.scaled_text())
+        # Opening a sibling and closing the old owner in one turn keeps the
+        # window count at one, but still requires transferring the placement.
+        self.lua("vim.cmd('split'); vim.api.nvim_win_close(_G.owner,true); "
+                 "vim.wait(300); vim.cmd('redraw!')")
+        self.pump(.3)
+        self.assertIn('FIRST', self.scaled_text())
+        self.assert_source()
+
+    def test_distinct_markdown_buffers_keep_typography_in_both_splits(self):
+        self.tmux('set-option', '-g', 'allow-passthrough', 'on')
+        self.render(['BEFORE', '', '# FIRST', '', 'BODY'])
+        self.lua("vim.env.KITTY_WINDOW_ID='1'; require('inkstone.core.manager').init(); "
+                 "require('inkstone.core.manager').attach(vim.api.nvim_get_current_buf()); "
+                 "require('inkstone.api').render({buf=vim.api.nvim_get_current_buf()}); vim.wait(200); "
+                 "vim.cmd('vsplit'); local b=vim.api.nvim_create_buf(false,true); vim.api.nvim_win_set_buf(0,b); "
+                 "vim.api.nvim_buf_set_lines(b,0,-1,false,{'BEFORE','','# SECOND','','BODY'}); "
+                 "vim.bo[b].filetype='markdown'; vim.treesitter.start(b,'markdown'); "
+                 "require('inkstone.api').render({buf=b}); vim.wait(300); vim.cmd('redraw!')")
+        self.pump(.3)
+        self.assertIn('FIRST', self.scaled_text())
+        self.assertIn('SECOND', self.scaled_text())
+
     def test_leaving_rendered_buffer_or_tab_clears_overlays_before_new_text(self):
         self.tmux('set-option', '-g', 'allow-passthrough', 'on')
         self.render(['BEFORE', '', '# FIRST', '', '## SECOND', '', 'BODY'])

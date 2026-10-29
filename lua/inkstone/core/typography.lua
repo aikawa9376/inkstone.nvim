@@ -1,6 +1,6 @@
 -- Kitty OSC 66 text is outside Neovim's grid. Reserve its cells, erase it
 -- before native redraws and replay it after the grid flush. Never change tmux.
-local M = { active = {}, drawn = {}, tmux = nil, pending = false }
+local M = { active = {}, drawn = {}, tmux = nil, pending = false, windows = {} }
 local ns = vim.api.nvim_create_namespace('inkstone.typography')
 local probe_timeout = 1200
 local cursorline_windows = {}
@@ -166,6 +166,11 @@ function M.supports(context)
     if context.config.typography.enabled == false
         or (context.config.typography.enabled ~= true and not kitty()) or not vim.api.nvim_ui_send
         or #vim.api.nvim_list_uis() == 0 or vim.env.ZELLIJ then return false end
+    -- Reservations are buffer-wide, while placements/layout have one owner
+    -- window per buffer. Use native glyphs in every view of a shared buffer.
+    local wins = vim.fn.win_findbuf(context.buf)
+    M.windows[context.buf] = wins
+    if #wins > 1 then return false end
     M.waiters = M.waiters or {}
     if not M.tmux or (M.capability == nil and M.tmux.allowed) then M.waiters[context.buf] = context.win end
     if not M.tmux then
@@ -175,6 +180,31 @@ function M.supports(context)
         end)
     elseif M.tmux.allowed then M.probe() end
     return M.tmux ~= nil and M.tmux.allowed and M.capability == true
+end
+
+-- A float can open/close without resizing the original view, and a split can
+-- switch buffers without changing geometry. Rebuild reservations on both edges
+-- of the shared-buffer fallback, including windows in other tabs.
+function M.refresh_windows()
+    if M.windows_pending then return end
+    M.windows_pending = true
+    vim.schedule(function()
+        M.windows_pending = false
+        for buf, previous in pairs(M.windows) do
+            if not vim.api.nvim_buf_is_valid(buf) then M.windows[buf] = nil
+            else
+                local wins = vim.fn.win_findbuf(buf)
+                if not vim.deep_equal(wins, previous) then
+                    for _, win in ipairs(wins) do
+                        if vim.api.nvim_win_get_tabpage(win) == vim.api.nvim_get_current_tabpage() then
+                            require('inkstone.core.ui').update(buf, win, 'TypographyWindows', true)
+                            break
+                        end
+                    end
+                end
+            end
+        end
+    end)
 end
 
 function M.spec(ratio)
@@ -648,6 +678,7 @@ local function start()
 end
 
 function M.clear(buf, keep_waiter)
+    if not buf then M.windows = {} elseif not keep_waiter then M.windows[buf] = nil end
     if buf and M.waiters and not keep_waiter then M.waiters[buf] = nil elseif not buf then M.waiters = {} end
     local painted = false
     for _, rect in ipairs(M.drawn) do if not buf or rect.buf == buf then painted = true; break end end
@@ -705,6 +736,12 @@ function M.check_visibility()
 end
 
 local group = vim.api.nvim_create_augroup('InkstoneTypography', { clear = true })
+vim.api.nvim_create_autocmd({ 'BufWinEnter', 'BufWinLeave', 'WinNew', 'WinClosed', 'TabEnter' }, {
+    group = group, callback = M.refresh_windows,
+})
+vim.api.nvim_create_autocmd('BufWipeout', { group = group, callback = function(args)
+    M.windows[args.buf] = nil
+end })
 vim.api.nvim_create_autocmd({ 'FocusLost', 'FocusGained' }, { group = group, callback = function(args)
     M.focused = args.event == 'FocusGained'
     M.check_visibility()

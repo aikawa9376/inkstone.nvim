@@ -168,6 +168,12 @@ metadata remain attached to the actual render request.
 `core/typography.lua` owns literal display runs, screen-space placement, terminal
 detection and repaint lifecycle. Headings reserve their scaled rows through
 normal extmarks; eligible `<small>` HTML spans retain source cell positions.
+Decorations and layout are shared per buffer, and each buffer's terminal
+placements have one owner window. Showing the same buffer in multiple windows
+(including floats or other tabs) therefore uses normal-size rendering in all
+of its views. Window lifecycle changes force a new layout when the view set
+changes; returning to one window restores sizing. Separate buffers retain
+independent typography in their splits.
 ATX titles expose a direct `inline` child; Setext titles expose it through a
 `paragraph`. Both use the configured size for their heading level. Multiline
 Setext content is styled per source row and reserves scaled virtual rows for

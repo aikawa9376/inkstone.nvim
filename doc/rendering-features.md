@@ -206,6 +206,10 @@ as `#` and `##`. Multiline Setext titles retain their source line breaks, and
 their underlines are hidden without hiding the following paragraph. A blank
 line before `---` keeps it a thematic break, outside typography. Existing
 `heading.atx` / `heading.setext` settings still control which headings render.
+When the same buffer is open in multiple windows, headings and small text
+automatically use their normal size so every view remains readable. This also
+includes floating views and windows in other tabs. Closing the extra views
+restores sizing; different Markdown buffers can still use sizing in both splits.
 Literal single-line `<small>supporting text</small>` spans use
 the smaller size. Nested/indented headings and spans already replaced by table
 or paragraph layouts retain their existing rendering. Set `paragraph.wrap = false`
