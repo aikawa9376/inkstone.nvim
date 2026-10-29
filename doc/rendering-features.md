@@ -196,7 +196,12 @@ require('inkstone').setup({
 ```
 
 Top-level headings reserve enough rows for their scaled text and wrap to the
-available width. Literal single-line `<small>supporting text</small>` spans use
+available width. Setext headings use the same H1 (`===`) and H2 (`---`) sizes
+as `#` and `##`. Multiline Setext titles retain their source line breaks, and
+their underlines are hidden without hiding the following paragraph. A blank
+line before `---` keeps it a thematic break, outside typography. Existing
+`heading.atx` / `heading.setext` settings still control which headings render.
+Literal single-line `<small>supporting text</small>` spans use
 the smaller size. Nested/indented headings and spans already replaced by table
 or paragraph layouts retain their existing rendering. Set `paragraph.wrap = false`
 when using small spans in long paragraphs. Unrepresentable narrow placements

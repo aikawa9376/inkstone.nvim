@@ -284,18 +284,26 @@ function M.heading(context, marks, node, data)
     local spec = M.spec(context.config.typography.headings[data.level])
     -- Keep native layout for nested/indented headings and impossible widths.
     if not spec or node.start_col ~= 0 or node:col() ~= 0 then return false end
-    local inline = node:child('inline')
+    -- Setext headings wrap their inline content in a paragraph node.
+    local content = data.atx and node or node:child('paragraph')
+    local inline = content and content:child('inline')
     if not inline then return false end
-    local line = require('inkstone.lib.display').line(context, inline)
-    if #line == 0 then return false end
-    local runs, lines = M.runs(line, spec), {}
-    local current, width, budget = {}, 0, context:window_width()
-    for _, run in ipairs(runs) do
-        if run.width > budget then return false end
-        if width + run.width > budget then lines[#lines + 1] = { runs = current, width = width }; current, width = {}, 0 end
-        current[#current + 1], width = run, width + run.width
+    local lines, budget = {}, context:window_width()
+    -- Setext titles may contain multiple source lines. Resolve styles and
+    -- inline replacements on each row, keeping their existing line breaks.
+    for i, text in ipairs(vim.split(inline.text, '\n', { plain = true })) do
+        local row, col = inline.start_row + i - 1, i == 1 and inline.start_col or 0
+        local line = require('inkstone.lib.display').line(context, {
+            start_row = row, end_row = row, start_col = col, end_col = col + #text, text = text,
+        })
+        local current, width = {}, 0
+        for _, run in ipairs(M.runs(line, spec)) do
+            if run.width > budget then return false end
+            if width + run.width > budget then lines[#lines + 1] = { runs = current, width = width }; current, width = {}, 0 end
+            current[#current + 1], width = run, width + run.width
+        end
+        if #current > 0 then lines[#lines + 1] = { runs = current, width = width } end
     end
-    if #current > 0 then lines[#lines + 1] = { runs = current, width = width } end
     if #lines == 0 then return false end
     local last = node.end_row - (node.end_col == 0 and 1 or 0)
     local entry = { id = 'heading:' .. node.start_row, range = { node.start_row, last },
@@ -313,7 +321,15 @@ function M.heading(context, marks, node, data)
     end
     if #virtual > 0 then marks:add(context.config.heading, true, node.start_row, 0, { virt_lines = virtual }) end
     if not data.atx then
-        marks:over(context.config.heading, true, data.marker, { conceal_lines = '' })
+        -- Continuation rows now live in virtual lines, alongside scaled-row
+        -- padding. Hide them and the underline without hiding the next block.
+        -- conceal_lines includes end_row even when end_col is zero.
+        local marker = data.marker
+        local last = marker.end_row - (marker.end_col == 0 and 1 or 0)
+        local line = vim.api.nvim_buf_get_lines(context.buf, last, last + 1, false)[1] or ''
+        marks:add(context.config.heading, true, node.start_row + 1, 0, {
+            end_row = last, end_col = marker.end_col > 0 and marker.end_col or #line, conceal_lines = '',
+        })
     end
     tag(marks, first, entry)
     return true

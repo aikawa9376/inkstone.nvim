@@ -677,6 +677,32 @@ class TerminalTests(unittest.TestCase):
         self.assertIn(label, scaled_text(), 'a completed redraw must repair even without explicit source-row damage')
         self.assert_source()
 
+    def test_setext_typography_keeps_body_and_thematic_break_visible(self):
+        self.tmux('set-option', '-g', 'allow-passthrough', 'on')
+        self.render(['BEFORE', '', 'Second level', '---', 'H2 BODY', '',
+                     'First level', '===', 'H1 BODY', '', 'Plain paragraph', '', '---', '',
+                     'Short title', 'Longer continuation', '===', 'MULTI BODY', 'AFTER'])
+        self.lua("vim.env.KITTY_WINDOW_ID='1'; "
+                 "require('inkstone.state').get(vim.api.nvim_get_current_buf()).paragraph.wrap=false; "
+                 "require('inkstone.api').render({buf=vim.api.nvim_get_current_buf()}); vim.wait(200)")
+        self.pump(.3)
+        for label in ('Second level', 'First level', 'Short title', 'Longer continuation'):
+            self.assertIn(label, self.scaled_text())
+        for label in ('H2 BODY', 'H1 BODY', 'Plain paragraph', 'MULTI BODY', 'AFTER'):
+            self.assertIn(label, self.visible_text())
+        self.assertIn('─', self.visible_text())
+        self.assertNotIn('===', self.visible_text())
+        self.assertNotIn('---', self.visible_text())
+        self.lua("local c=require('inkstone.state').get(vim.api.nvim_get_current_buf()); "
+                 "c.anti_conceal.enabled=true; vim.api.nvim_win_set_cursor(0,{4,0}); "
+                 "require('inkstone.api').render({buf=vim.api.nvim_get_current_buf()}); vim.wait(200)")
+        self.pump(.2)
+        self.assertNotIn('Second level', self.scaled_text())
+        self.assertIn('Second level', self.visible_text())
+        self.assertIn('---', self.visible_text())
+        self.assertIn('First level', self.scaled_text())
+        self.assert_source()
+
     def test_native_redraw_never_exposes_a_normal_size_typography_copy(self):
         self.tmux('set-option', '-g', 'allow-passthrough', 'on')
         self.render(['BEFORE', '', '# FIRST', '', '## SECOND', '', '### THIRD', '',

@@ -143,6 +143,12 @@ metadata remain attached to the actual render request.
 `core/typography.lua` owns literal display runs, screen-space placement, terminal
 detection and repaint lifecycle. Headings reserve their scaled rows through
 normal extmarks; eligible `<small>` HTML spans retain source cell positions.
+ATX titles expose a direct `inline` child; Setext titles expose it through a
+`paragraph`. Both use the configured size for their heading level. Multiline
+Setext content is styled per source row and reserves scaled virtual rows for
+each title line. Only continuation rows and the underline are line-concealed;
+the end row excludes the following block. The full title/underline source
+range owns anti-conceal restoration. A thematic break never enters this path.
 Once terminal support is confirmed, those extmarks reserve whitespace rather
 than a normal-size copy of the text. The literal runs remain in the OSC 66
 placement. Otherwise a native repaint can expose plain heading text without

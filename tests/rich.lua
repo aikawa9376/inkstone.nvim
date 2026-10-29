@@ -273,6 +273,72 @@ return function(test, equal, buffer)
         vim.api.nvim_buf_delete(buf, { force = true })
     end)
 
+    test('setext headings use H1/H2 typography while separated dashes stay a thematic break', function()
+        local typography = require('inkstone.core.typography')
+        local supports = typography.supports
+        typography.supports = function() return true end
+        local original = { 'BEFORE', '', 'Second level', '---', 'H2 BODY', '',
+            'First level', '===', 'H1 BODY', '', 'Plain paragraph', '', '---', '', 'AFTER' }
+        local buf, render = setup(original, { typography = { enabled = true }, paragraph = { wrap = false } })
+        local marks, ctx = render()
+        typography.supports = supports
+        equal(#ctx.typography, 2)
+        local headings = {}
+        for _, entry in ipairs(ctx.typography) do headings[entry.row] = entry end
+        equal(headings[2].spec, typography.spec(1.5))
+        equal(headings[6].spec, typography.spec(2))
+        equal(headings[2].range, { 2, 3 })
+        equal(headings[6].range, { 6, 7 })
+        local concealed, dash = {}, false
+        for _, mark in ipairs(marks) do
+            if mark.opts.conceal_lines then
+                for row = mark.start_row, mark.opts.end_row do concealed[row] = true end
+            end
+            if mark.start_row == 12 and not mark.font_id and mark.opts.virt_text then dash = true end
+        end
+        assert(concealed[3] and concealed[7], 'setext underlines must be hidden')
+        assert(not concealed[4] and not concealed[8], 'following paragraphs must stay visible')
+        assert(dash, 'blank-separated dashes must retain the thematic-break renderer')
+        equal(vim.api.nvim_buf_get_lines(buf, 0, -1, false), original)
+        vim.api.nvim_buf_delete(buf, { force = true })
+    end)
+
+    test('multiline setext typography preserves title rows and source restoration', function()
+        local typography = require('inkstone.core.typography')
+        local supports = typography.supports
+        typography.supports = function() return true end
+        local original = { 'Short title', 'Longer continuation', '===', 'BODY' }
+        local buf, render = setup(original, { typography = { enabled = true }, paragraph = { wrap = false } })
+        local marks, ctx = render()
+        typography.supports = supports
+        equal(#ctx.typography, 1)
+        local entry = ctx.typography[1]
+        equal(entry.range, { 0, 2 })
+        equal(vim.tbl_map(function(line)
+            local text = {}; for _, run in ipairs(line.runs) do text[#text + 1] = run.text end
+            return table.concat(text)
+        end, entry.lines), { 'Short title', 'Longer continuation' })
+        local concealed
+        for _, mark in ipairs(marks) do
+            if mark.opts.conceal_lines then concealed = mark end
+        end
+        assert(concealed)
+        equal({ concealed.start_row, concealed.opts.end_row }, { 1, 2 })
+        local updater = require('inkstone.core.ui').updater.new(buf, vim.api.nvim_get_current_win(), true)
+        updater.mode = 'n'
+        state.get(buf).anti_conceal = { enabled = true, above = 0, below = 0, disabled_modes = {} }
+        for row = 1, 3 do
+            vim.api.nvim_win_set_cursor(0, { row, 0 })
+            local hidden = updater:hidden()
+            for _, mark in ipairs(marks) do
+                assert(updater:hide(require('inkstone.lib.extmark').new(mark), hidden),
+                    'all title decorations must restore on any title or underline row')
+            end
+        end
+        equal(vim.api.nvim_buf_get_lines(buf, 0, -1, false), original)
+        vim.api.nvim_buf_delete(buf, { force = true })
+    end)
+
     test('typography owns only its temporary cursorline suppression flag', function()
         local typography = require('inkstone.core.typography')
         local buf = buffer({ 'heading', 'body' })
