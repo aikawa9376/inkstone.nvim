@@ -132,6 +132,8 @@ make terminal
 
 パーサーの置き場所は `INKSTONE_PARSER_RTP`、テスト依存は `INKSTONE_PLENARY_RTP` と `INKSTONE_MINI_ICONS_RTP` で指定できます。追加のパーサー置き場には `INKSTONE_EXTRA_PARSER_RTP` を使えます。テスト実行でパーサーを勝手にインストールしません。
 
+Noiceとnui.nvimがある場合は、コマンド・検索ポップアップの終了時にも装飾を保持する統合テストを実行します。場所は `INKSTONE_NOICE_RTP` / `INKSTONE_NUI_RTP`、既定は各プラグインのlazy.nvimインストール先です。
+
 計測の詳細は [doc/performance.md](doc/performance.md)、構成と次の開発対象は [doc/architecture.md](doc/architecture.md) を参照してください。
 
 ## ベースと参考実装

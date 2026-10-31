@@ -33,9 +33,11 @@ semantics over logical buffer rows.
 
 Native padding stays in place through anti-conceal; inline Markdown decorations
 still obey anti-conceal independently. When native paragraphs and normal-mode
-rendering are enabled, Visual and operator-pending modes retain the normal
-rendered view even if `render_modes` omits them, so selection/operators keep
-their starting geometry.
+rendering are enabled, Visual, operator-pending and command-line modes retain
+the normal rendered view even if `render_modes` omits them. Selection, operators,
+`:`, `/` and `?` keep their starting geometry, including accept/cancel. In
+particular, an override such as `render_modes = { 'n', 't' }` does not temporarily
+remove decorations and reset conceal/wrap options during command/search input.
 Anti-conceal still uses the actual selection range. Widths follow source characters, including
 concealed Markdown delimiters, so concealed rows can appear shorter. English
 words and source whitespace are preserved. While this layout is active, Inkstone

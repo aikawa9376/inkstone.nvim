@@ -100,9 +100,15 @@ breakindent/showbreak and paragraph padding. Native motions/operators own source
 positions; anti-conceal does not remove wrap padding. Native conceal can leave
 short-looking rows because budgets include source Markdown delimiters.
 When native paragraphs and normal-mode rendering are enabled, UI rendering
-retains normal-mode geometry throughout Visual selection and pending operators,
-even if those modes are omitted from `render_modes`. Anti-conceal still sees
-the actual mode/selection.
+retains normal-mode geometry throughout Visual selection, pending operators and
+command/search input, even if those modes are omitted from `render_modes`.
+Anti-conceal still sees the actual mode/selection. Filetype overrides that omit
+`c` (for example LazyAgent's `{ 'n', 't' }`) otherwise clear decorations and
+restore raw conceal/linebreak options until command/search exit. That transition
+reproduces without Noice; Noice's popup can expose the unrendered source when
+it closes. Native continuity prevents the clear/reset rather than hiding it
+with a timeout. Joined layouts and views without normal paragraph rendering
+retain their configured mode policy.
 
 `core/ui.lua` temporarily disables native `linebreak` while this layout is
 active, restoring the exact prior per-window value when it stops. The softwrap

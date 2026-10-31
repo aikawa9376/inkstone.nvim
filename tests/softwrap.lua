@@ -139,6 +139,49 @@ return function(test, equal)
         ]=]), '今日は天気がいいから')
     end)
 
+    local function commandline_roundtrip(noice)
+        lua([=[
+            setup({'今日は天気がいいから散歩しましょう。'}, { render_modes = { 'n', 't' } })
+            _G.commandline_clears = {}
+            local updater = require('inkstone.core.ui').updater
+            _G.original_clear = updater.clear
+            updater.clear = function(self, ...)
+                commandline_clears[#commandline_clears + 1] = self.mode
+                return original_clear(self, ...)
+            end
+        ]=])
+        for _, entry in ipairs({ ':let g:inkstone_cmdline_probe=1', '/散歩', '?天気' }) do
+            for _, leave in ipairs({ '<Esc>', '<CR>' }) do
+                rpc('nvim_input', entry)
+                equal(lua([=[
+                    assert(vim.wait(1000, function() return vim.fn.mode() == 'c' end, 5))
+                    vim.wait(150)
+                    return { padding_count(), rows(2), vim.wo.linebreak, vim.wo.conceallevel }
+                ]=]), { 1, { '今日は天気がいいから', '散歩しましょう。' }, false, 3 })
+                if noice then
+                    equal(lua([=[
+                        for _, win in ipairs(vim.api.nvim_list_wins()) do
+                            if vim.bo[vim.api.nvim_win_get_buf(win)].filetype == 'noice' then return true end
+                        end
+                        return false
+                    ]=]), true)
+                end
+                rpc('nvim_input', leave)
+                equal(lua([=[
+                    assert(vim.wait(1000, function() return vim.fn.mode() == 'n' end, 5))
+                    vim.wait(150)
+                    return { padding_count(), rows(2), vim.wo.linebreak, vim.wo.conceallevel }
+                ]=]), { 1, { '今日は天気がいいから', '散歩しましょう。' }, false, 3 })
+            end
+        end
+        equal(lua([=[
+            require('inkstone.core.ui').updater.clear = original_clear
+            return commandline_clears
+        ]=]), {})
+    end
+
+    test('command and search roundtrips preserve native decorations when c is omitted', commandline_roundtrip)
+
     test('native wrapping accounts for breakindent, showbreak, gutters and paragraph padding', function()
         equal(lua([=[
             setup({' 今日は天気がいいから散歩しましょう。'})
@@ -273,6 +316,33 @@ return function(test, equal)
             { ' abcdefghijklmnopqrstuvw', 'xyz' }, { true, 0 },
         })
     end)
+
+    local data = vim.fn.stdpath('data')
+    local noice = vim.env.INKSTONE_NOICE_RTP or (data .. '/lazy/noice.nvim')
+    local nui = vim.env.INKSTONE_NUI_RTP or (data .. '/lazy/nui.nvim')
+    if vim.fn.filereadable(noice .. '/lua/noice/init.lua') == 1 and vim.fn.filereadable(nui .. '/lua/nui/popup/init.lua') == 1 then
+        test('Noice command and search popups preserve native decorations on accept and cancel', function()
+            lua([=[
+                local noice, nui = ...
+                vim.opt.rtp:append(noice)
+                vim.opt.rtp:append(nui)
+                require('noice').setup({
+                    cmdline = { enabled = true, view = 'cmdline_popup' },
+                    popupmenu = { enabled = false }, notify = { enabled = false },
+                    messages = { view = 'mini', view_error = 'mini', view_warn = 'mini', view_search = false },
+                    lsp = { progress = { enabled = false }, hover = { enabled = false }, signature = { enabled = false } },
+                    health = { checker = false },
+                    views = { cmdline_popup = { position = { row = 12, col = 0 }, size = { width = 20, height = 1 } } },
+                })
+                assert(vim.wait(2000, function() return require('noice.config').is_running() end, 5))
+                assert(require('noice.ui')._attached, 'Noice did not attach its UI')
+            ]=], noice, nui)
+            commandline_roundtrip(true)
+            lua("require('noice').disable()")
+        end)
+    else
+        print('SKIP: Noice cmdline integration (set INKSTONE_NOICE_RTP and INKSTONE_NUI_RTP)')
+    end
 
     pcall(rpc, 'nvim_command', 'qa!')
     vim.fn.jobstop(child)
