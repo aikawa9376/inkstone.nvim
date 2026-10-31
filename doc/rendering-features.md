@@ -3,8 +3,8 @@
 These features render without changing source bytes. Search, yank and save keep
 the original Markdown. `:Inkstone disable` restores source rendering.
 
-Cursor restoration follows `anti_conceal` consistently for typography,
-paragraphs, table/list/chart views and replaced formula blocks. With
+Cursor restoration follows `anti_conceal` for typography,
+joined paragraphs, table/list/chart views and replaced formula blocks. With
 `anti_conceal.enabled = false`, moving onto their source rows keeps the rendered
 view. When enabled, the configured `above`/`below` range restores source as a
 whole layout. `disabled_modes` and normal `render_modes` still apply.
@@ -22,13 +22,36 @@ require('inkstone').setup({
 ```
 
 Top-level paragraphs use the available window width, bundled BudouX phrase
-boundaries and basic kinsoku rules. Source newlines stay separate by default;
-each long source line wraps independently. Set `paragraph.join = true` to join
+boundaries and basic kinsoku rules. With the default `wrap = true, join = false`,
+source rows remain visible and editable. Inline virtual whitespace fills unused
+space at chosen wrap positions; Neovim wraps the following source character.
+There are no replacement virtual rows. `gj`/`gk`, `g0`/`g$`, character selection,
+mouse positioning and operators use real source positions. `g0yg$` yanks a
+screen row; `yy` still yanks the entire logical source line. Virtual whitespace
+never enters registers or saved text. Block selection retains Neovim's native
+semantics over logical buffer rows.
+
+Native padding stays in place through anti-conceal; inline Markdown decorations
+still obey anti-conceal independently. When native paragraphs and normal-mode
+rendering are enabled, Visual and operator-pending modes retain the normal
+rendered view even if `render_modes` omits them, so selection/operators keep
+their starting geometry.
+Anti-conceal still uses the actual selection range. Widths follow source characters, including
+concealed Markdown delimiters, so concealed rows can appear shorter. English
+words and source whitespace are preserved. While this layout is active, Inkstone
+temporarily disables `linebreak` to prevent Neovim making a second wrap decision
+across padding. It restores the previous window value when native layout stops,
+including disable, buffer switches and shared-window fallback. An explicit
+`win_options.linebreak` overrides this policy; setting its rendered value to true
+uses ordinary native wrapping without BudouX padding.
+
+Source newlines stay separate and each long source line wraps independently.
+Set `paragraph.join = true` to join
 soft source newlines with a space for English, or without an added space between
 adjacent CJK text. Two trailing spaces or a trailing backslash always preserve
 an explicit line break. Inline highlights, links
-and inline code keep their rendered decorations. Width and layout are rebuilt
-on resize. With anti-conceal enabled, the original paragraph returns when its
+and inline code keep their rendered decorations. Joining uses the virtual-row
+renderer. With anti-conceal enabled, the original joined paragraph returns when its
 source overlaps the configured cursor range; leaving it restores the layout.
 With anti-conceal disabled the layout stays visible under the cursor.
 The side preview can show the rendered paragraph while the source is
@@ -37,10 +60,15 @@ being edited.
 `wrap` and `join` are independent. `wrap = false, join = true` joins soft source
 lines without wrapping the virtual output to the window width. With both false,
 paragraphs use Neovim's ordinary source wrapping. `join` is false by default.
-Paragraphs inside lists and quotes retain their existing layout. Paragraphs
-containing image anchors or externally converted math retain source-row layout
-so their image/math placements remain anchored correctly. Very narrow windows
-fall back to source display. This is not full JIS X 4051 conformance.
+Paragraphs inside lists and quotes retain their existing layout. Native wrapping
+accounts for number/sign/fold gutters, ordinary `breakindent`, `showbreak`, and
+paragraph margins/indentation. It falls back to ordinary source wrapping for
+shared buffers displayed in multiple windows, `nowrap`, `list`, number columns
+with `cpoptions+=n`, very narrow windows, control characters/tabs, unsupported
+breakindent options, or rows with additional inline virtual text such as link
+icons/code padding. Image anchors and converted math retain their source layout.
+Closing a shared view, resizing or changing wrap options rebuilds the layout.
+This is not full JIS X 4051 conformance.
 
 ## LaTeX formulas
 

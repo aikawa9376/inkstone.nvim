@@ -29,14 +29,27 @@ The API returns strings without editing any buffer. Width follows Neovim's
 strdisplaywidth(). Top-level paragraphs use this layout by default. Source
 newlines are preserved and each long line wraps independently. Set
 paragraph.join=true to join soft source newlines; explicit Markdown hard breaks
-always remain. With anti_conceal enabled, its cursor range restores the whole
-source paragraph. The wrap and join flags are independent; both false use
+always remain. With join=false, inline whitespace guides native wrapping while
+source rows stay visible. Use gj/gk, g0/g$, character selection and yank normally;
+g0yg$ yanks a screen row, yy the original logical line. Padding never enters
+registers or saved text. Anti-conceal does not remove native wrap padding.
+With native paragraphs and normal-mode rendering enabled, Visual selection and
+pending operators keep the normal view even if render_modes omits these modes;
+anti-conceal still uses the
+actual selection range.
+Inkstone temporarily disables linebreak for this layout and restores the
+previous window setting when it stops. Explicit win_options.linebreak overrides
+this policy. Shared windows, nowrap/list, tabs/control characters, unsupported
+indent options and additional inline virtual text use ordinary source wrapping.
+See doc/rendering-features.md, "Japanese paragraph layout", for the full limits.
+With join=true, virtual rows are used; anti_conceal's cursor range restores the
+whole source paragraph. The wrap and join flags are independent; both false use
 Neovim's ordinary source wrapping. Defaults are wrap=true, join=false.
 
 Tables with wrapped replacement rows restore the whole source table when
 anti_conceal's cursor range overlaps it. Borders and inline decorations return
 when the cursor leaves. With anti_conceal.enabled=false, rendered typography,
-paragraphs, table/list/chart views and math blocks remain visible under the cursor; source
+joined paragraphs, table/list/chart views and math blocks remain visible under the cursor; source
 wrap/nowrap behavior remains visible while editing.
 Nested list/quote paragraphs, image anchors and converted math keep source rows.
 

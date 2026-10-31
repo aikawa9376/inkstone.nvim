@@ -44,7 +44,13 @@ or deletions. Width-option changes, reloads and unaccounted changedticks still
 invalidate conservatively. Unload/wipe releases the cache and attachment state.
 The first cold width scan still reads the whole block.
 
-Paragraph reflow reuses its measured display units for wrapping. Its bounded
+Native paragraph wrapping caches source-position boundaries by source text,
+first/continuation budgets, Japanese options and display-width settings, using
+the same bounded layout cache. Unit decomposition and BudouX run only on misses
+for source rows intersecting the viewport ranges. Nonzero paragraph margins or
+indentation can still require a whole-paragraph width summary. Colors remain
+native and need no layout rebuild.
+Joined paragraph reflow reuses its measured display units for wrapping. Its bounded
 layout cache compares exact, canonical snapshots of source slices, hard breaks,
 final inline insertions/highlights/conceals, prefix, width, margins, Japanese
 options and display-width settings. Cached results are copied before emission
@@ -84,13 +90,36 @@ Widths use Neovim's display-width function. Table wrapping preserves inline
 highlight segments while rebuilding virtual rows; `inkstone.text` exposes the
 same layout without changing a source buffer.
 
-Top-level paragraphs use `text/paragraph.lua` to wrap rendered inline chunks
-with the same Japanese layout kernel. `paragraph.wrap` defaults to true and
-`paragraph.join` to false, preserving source newlines while wrapping each long
-line independently. Explicit joining combines soft breaks but retains hard
-breaks; it can also run with wrapping disabled. Both flags participate in the
-paragraph layout cache key. Lists/quotes, image anchors and converted
-math retain their existing layout. Anti-conceal overlapping a replaced source
+Top-level paragraphs default to `paragraph.wrap=true, paragraph.join=false`.
+`render/markdown/paragraph.lua:softwrap` keeps source rows and inserts only
+end-of-screen-row whitespace using persistent inline extmarks. `text/layout.lua`
+shares BudouX/kinsoku decisions between virtual layout and source-backed ranges;
+source ranges preserve every whitespace byte. `lib/softwrap.lua` calculates
+source byte offsets and first/continuation budgets, matching native gutters,
+breakindent/showbreak and paragraph padding. Native motions/operators own source
+positions; anti-conceal does not remove wrap padding. Native conceal can leave
+short-looking rows because budgets include source Markdown delimiters.
+When native paragraphs and normal-mode rendering are enabled, UI rendering
+retains normal-mode geometry throughout Visual selection and pending operators,
+even if those modes are omitted from `render_modes`. Anti-conceal still sees
+the actual mode/selection.
+
+`core/ui.lua` temporarily disables native `linebreak` while this layout is
+active, restoring the exact prior per-window value when it stops. The softwrap
+module clears owned options on setup, buffer leave/wipe and window close.
+Explicit `win_options.linebreak` takes precedence; true disables BudouX padding.
+`core/manager.lua` rebuilds geometry on window lifetime and relevant option
+events. Because persistent extmarks are buffer-wide, multiple views fall back
+to ordinary source wrapping until only one window remains. Other conservative
+fallbacks cover tabs/control characters, list display, unsupported indent
+settings, `cpoptions+=n` with numbers and additional inline insertions. Source
+is never replaced on fallback. See `doc/rendering-features.md`, "Japanese
+paragraph layout", for the user contract and limits.
+
+Explicit `join=true` still uses `text/paragraph.lua` to wrap rendered inline
+chunks as virtual rows. It combines soft breaks but retains hard breaks and
+can run with wrapping disabled. Lists/quotes, image anchors and converted
+math retain their existing layout. Anti-conceal overlapping joined replaced source
 row restores the complete paragraph; disabling it retains the rendered view.
 `Marks:replace` translates half-open
 Tree-sitter ranges to the inclusive end-row semantics of `conceal_lines`;
@@ -100,14 +129,14 @@ table's source on cursor-range overlap, including fitting rows and the delimiter
 marks carry their owning source range so adjacent blank-row borders disappear
 too; inline decorations inside the table are also hidden. Leaving the table
 restores the complete rendered layout. Disabled anti-conceal keeps table/list/
-chart/paragraph/typography/formula views rendered even on their source rows.
+chart/joined-paragraph/typography/formula views rendered even on their source rows.
 Source editing uses Neovim's normal wrap/nowrap behavior.
 
-With joining disabled, each paragraph source row keeps its own leading prefix
-and corresponding wrapping budget. A transcript banner at column zero and an
-indented body may share one Markdown paragraph; reusing its first row's prefix
-would shift one or the other when any row needs reflow. Row prefixes, budgets
-and indentation are part of the layout snapshot.
+With joining disabled, each source row keeps its own leading whitespace;
+continuation indentation follows native `breakindent`. A transcript banner at
+column zero and an indented body can share a paragraph without inheriting one
+another's prefix. Native styles, including foreign extmark role colors, remain
+on their original source rather than being copied into virtual chunks.
 
 `request/highlights.lua` projects multiline captures onto each intersecting
 visible row using that row's byte endpoints. The end column of a multiline
@@ -354,7 +383,8 @@ flat latex2text output. Failed results keep source instead of rendering `error`.
   native coordinates and correct cursor/anti-conceal behavior.
 - Shared parser timeout/retry policy that does not alter other plugins' native
   highlighters. Async time slicing changes responsiveness, not native parse cost.
-- Extend paragraph layout to nested lists/quotes and richer display navigation.
+- Extend native paragraph wrapping to nested lists/quotes, inline replacements
+  and independently scoped shared-window layouts.
 - Optional native layout kernel only after measurements justify the cost. Keep
   Neovim display-width parity, pass incremental data, reject stale results and
   retain a working Lua fallback. A worker cannot share Neovim-owned TSNode pointers.

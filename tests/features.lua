@@ -184,11 +184,8 @@ return function(test, equal, buffer)
             return result
         end
         local width = ctx:window_width()
-        local expected = {}
-        for _, source in ipairs({ first, second, last }) do
-            vim.list_extend(expected, require('inkstone.text').wrap(source, width))
-        end
-        equal(rows(marks), expected)
+        equal(rows(marks), {})
+        assert(vim.iter(marks):any(function(mark) return mark.opts.virt_text_pos == 'inline' end))
         local function render()
             local fresh = Context.new(buf, vim.api.nvim_get_current_win(), require('inkstone.state').get(buf))
             fresh.view.ranges = { { 0, #original } }
@@ -202,14 +199,14 @@ return function(test, equal, buffer)
         ctx.config.paragraph.join = false
         equal(rows(render()), {})
         ctx.config.paragraph.wrap = true
-        equal(rows(render()), expected)
+        equal(rows(render()), {})
         equal(vim.api.nvim_buf_get_lines(buf, 0, -1, false), original)
         vim.api.nvim_buf_delete(buf, { force = true })
     end)
 
     test('replacement rows retain foreign range highlights without importing old renderer marks', function()
         local original = { '─ Assistant ' .. ('─'):rep(12), ('日本語の本文です。'):rep(15), '', 'AFTER' }
-        local buf, parser, ctx = parse(original)
+        local buf, parser, ctx = parse(original, { paragraph = { join = true } })
         local foreign = vim.api.nvim_create_namespace('lazyagent-test-transcript')
         vim.api.nvim_buf_set_extmark(buf, foreign, 0, 0, {
             end_col = #original[1], hl_group = 'DiagnosticInfo', priority = 200,
@@ -238,7 +235,7 @@ return function(test, equal, buffer)
             end
             return table.concat(result)
         end
-        equal(styled(render(), 'DiagnosticInfo'), original[1])
+        equal(styled(render(), 'DiagnosticInfo'), original[1] .. ' ')
         assert(styled(render(), 'Special'):find('日本語', 1, true))
         -- External changes must invalidate the layout even without a text edit.
         vim.api.nvim_buf_clear_namespace(buf, foreign, 0, -1)

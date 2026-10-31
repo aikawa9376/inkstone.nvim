@@ -54,6 +54,35 @@ function M.init()
             end
         end,
     })
+    -- Inline paragraph padding is valid for one window geometry. Rebuild on
+    -- either edge of the shared-buffer fallback and on native wrap options.
+    local pending = false
+    local function refresh_paragraphs()
+        if pending then return end
+        pending = true
+        vim.schedule(function()
+            pending = false
+            for _, buf in ipairs(M.buffers) do
+                if vim.api.nvim_buf_is_valid(buf) then
+                    local config = state.get(buf)
+                    local wins = env.buf.wins(buf)
+                    if config.enabled and config.paragraph.wrap and not config.paragraph.join and #wins > 0 then
+                        ui.update(buf, wins[1], 'ParagraphGeometry', true)
+                    end
+                end
+            end
+        end)
+    end
+    vim.api.nvim_create_autocmd({ 'BufWinEnter', 'BufWinLeave', 'WinClosed' }, {
+        group = M.group, callback = refresh_paragraphs,
+    })
+    vim.api.nvim_create_autocmd('OptionSet', {
+        group = M.group,
+        pattern = { 'wrap', 'linebreak', 'breakindent', 'breakindentopt', 'showbreak',
+            'number', 'relativenumber', 'numberwidth', 'signcolumn', 'foldcolumn',
+            'list', 'listchars', 'cpoptions', 'ambiwidth', 'display', 'tabstop', 'vartabstop', 'formatlistpat' },
+        callback = refresh_paragraphs,
+    })
 end
 
 ---@param buf integer

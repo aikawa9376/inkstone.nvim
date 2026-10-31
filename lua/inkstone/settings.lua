@@ -1646,7 +1646,7 @@ M.paragraph.default = {
     indent = 0,
     -- Minimum width to use for paragraphs.
     min_width = 0,
-    -- Wrap long source lines without changing source bytes.
+    -- Wrap source rows with native motions; join=true uses virtual layout.
     wrap = true,
     -- Join soft source newlines before layout; hard Markdown breaks remain.
     join = false,

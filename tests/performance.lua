@@ -19,9 +19,47 @@ return function(test, equal, buffer)
         return buf, render, parser
     end
 
-    test('paragraph cache preserves marks and invalidates display inputs', function()
+    test('native paragraph layout is viewport bounded and caches source boundaries', function()
+        local lines = {}
+        for i = 1, 1000 do lines[i] = ('日本語の文章を文節で折り返します。'):rep(6) end
+        local buf, _, parser = setup(lines)
+        local softwrap = require('inkstone.lib.softwrap')
+        local original, calls = softwrap.layout, 0
+        softwrap.layout = function(...) calls = calls + 1; return original(...) end
+        local function render()
+            parser:parse(true)
+            local ctx = Context.new(buf, vim.api.nvim_get_current_win(), require('inkstone.state').get(buf))
+            ctx.view.ranges = { { 100, 101 }, { 800, 801 } }
+            return handlers.run(ctx, parser)
+        end
+        local marks = render()
+        equal(calls, 4)
+        for _, mark in ipairs(marks) do
+            assert(not mark.replace)
+            assert((mark.start_row >= 100 and mark.start_row <= 101)
+                or (mark.start_row >= 800 and mark.start_row <= 801))
+        end
+        calls = 0
+        equal(render(), marks)
+        equal(calls, 0)
+        local config = require('inkstone.state').get(buf)
+        config.paragraph.japanese.budoux = false
+        render()
+        equal(calls, 4)
+        calls = 0
+        config.padding.highlight = 'String'
+        render()
+        equal(calls, 0)
+        vim.api.nvim_buf_set_text(buf, 100, 0, 100, 0, { '追加。' })
+        render()
+        equal(calls, 1)
+        softwrap.layout = original
+        vim.api.nvim_buf_delete(buf, { force = true })
+    end)
+
+    test('joined paragraph cache preserves marks and invalidates display inputs', function()
         local source = string.rep('日本語の **強調** と [リンク](https://example.org) を折り返します。', 10)
-        local buf, render = setup({ 'BEFORE', '', source, '', 'AFTER' })
+        local buf, render = setup({ 'BEFORE', '', source, '', 'AFTER' }, { paragraph = { join = true } })
         local first = render()
         local display = require('inkstone.lib.display')
         local original, calls = display.line, 0

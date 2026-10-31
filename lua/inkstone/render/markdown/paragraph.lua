@@ -41,13 +41,74 @@ end
 
 ---@protected
 function Render:run()
-    local widths = self.node:widths()
-    local width = math.max(vim.fn.max(widths), self.config.min_width)
-    local margin = self.context:percent(self.data.margin, width)
-    local indent = self.context:percent(self.data.indent, width)
+    local margin, indent = 0, 0
+    if self.data.margin > 0 or self.data.indent > 0 then
+        local width = math.max(vim.fn.max(self.node:widths()), self.config.min_width)
+        margin = self.context:percent(self.data.margin, width)
+        indent = self.context:percent(self.data.indent, width)
+    end
+    if self.config.wrap and not self.config.join then
+        self:softwrap(margin, indent)
+        self:padding(self.node.start_row, self.node.end_row - 1, margin)
+        self:padding(self.node.start_row, self.node.start_row, indent)
+        return
+    end
     if self:reflow(margin, indent) then return end
     self:padding(self.node.start_row, self.node.end_row - 1, margin)
     self:padding(self.node.start_row, self.node.start_row, indent)
+end
+
+-- Keep real source rows under the cursor. Only the unused end of each screen
+-- row is virtual; native motions, selections and operators own the text.
+function Render:softwrap(margin, indent)
+    local context, node = self.context, self.node
+    local softwrap = require('inkstone.lib.softwrap')
+    if not softwrap.supports(context) then return end
+    local width = context:window_width()
+    local section = self:indent():line(true)
+    local repeat_prefix = section:copy():pad(margin):get()
+    local repeat_width = str.line_width(repeat_prefix)
+    local cache = require('inkstone.lib.layout_cache')
+    local function layout(row, text)
+        if text:find('!%[') or text:find('!%[%[') then return end
+        for _, formula in ipairs(context.latex:get()) do
+            if row >= formula.start_row and row <= formula.end_row then return end
+        end
+        local head = softwrap.head(context, text, width)
+        local first = width - repeat_width - (row == node.start_row and indent or 0)
+        local continuation = head and width - head - repeat_width or 0
+        -- Inline replacements have their own widths/coordinates. Keep native
+        -- wrapping rather than guessing where their source lands.
+        local body = { start_row = row, end_row = row, start_col = 0, end_col = #text, text = text }
+        if first < 2 or continuation < 2 or #context.inline:get(body, true) > 0 then return end
+        local input = vim.mpack.encode({ text, first, continuation, self.config.japanese,
+            vim.o.ambiwidth, vim.o.display })
+        local key = 'softwrap:' .. row
+        local breaks = cache.get(context.buf, key, input)
+        if breaks == nil then
+            breaks = softwrap.layout(text, first, continuation, self.config.japanese)
+            cache.put(context.buf, key, input, breaks, #text * 64)
+        end
+        for _, boundary in ipairs(breaks or {}) do
+            local line = self:line():pad(boundary.padding):extend(repeat_prefix):get()
+            if #line > 0 then
+                self.marks:add(self.config, false, row, boundary.col, {
+                    priority = 100, virt_text = line, virt_text_pos = 'inline', right_gravity = false,
+                })
+            end
+        end
+    end
+    -- Each source row is independent, so off-screen paragraph rows need no
+    -- decomposition or BudouX work, including disjoint shared-buffer views.
+    local last = node.end_row - (node.end_col == 0 and 1 or 0)
+    for _, range in ipairs(context.view.ranges) do
+        local first, stop = math.max(node.start_row, range[1]), math.min(last, range[2])
+        if first <= stop then
+            for i, text in ipairs(vim.api.nvim_buf_get_lines(context.buf, first, stop + 1, false)) do
+                layout(first + i - 1, text)
+            end
+        end
+    end
 end
 
 -- Source rows remain searchable/yankable. The UI restores the entire paragraph

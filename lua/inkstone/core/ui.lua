@@ -16,6 +16,7 @@ M.cache = {}
 
 ---called from state on setup
 function M.setup()
+    require('inkstone.lib.softwrap').clear()
     require('inkstone.core.typography').clear()
     local table_views = require('inkstone.core.table_views')
     for buf in pairs(table_views.cache) do table_views.clear(buf) end
@@ -105,13 +106,26 @@ function Updater:run()
         return
     end
     self.mode = env.mode.get() -- mode is only available after this point
+    local native = self.config.paragraph.enabled and self.config.paragraph.wrap and not self.config.paragraph.join
+    local paragraph_modes = env.mode.join(self.config.render_modes, self.config.paragraph.render_modes)
+    -- A native screen-row selection must keep the geometry it started with.
+    -- Keep the normal view through Visual/operator-pending modes; anti-conceal
+    -- still receives the actual mode/range. Joined layouts keep their policy.
+    self.native_mode = native
+        and (env.mode.is(self.mode, { 'v', 'V', '\22' }) or self.mode:sub(1, 2) == 'no')
+        and env.mode.is('n', paragraph_modes)
     local render = self.config.enabled
-        and self.config.resolved:render(self.mode)
+        and (self.config.resolved:render(self.mode) or self.native_mode)
         and env.win.view(self.win).leftcol == 0
         and (self.config.render.diff or not env.win.get(self.win, 'diff'))
     log.buf('info', 'Render', self.buf, render)
     local next_state = render and 'rendered' or 'default'
+    local softwrap = require('inkstone.lib.softwrap')
     for _, win in ipairs(env.buf.wins(self.buf)) do
+        softwrap.linebreak(win, render and native
+            and env.mode.is(self.native_mode and 'n' or self.mode, paragraph_modes)
+            and self.config.win_options.linebreak == nil
+            and softwrap.window_supported(self.buf, win))
         for name, value in pairs(self.config.win_options) do
             env.win.set(win, name, value[next_state])
         end
@@ -251,7 +265,7 @@ function Updater:hide(extmark, range)
 
     -- not in top level or mark level modes -> hide
     local show = env.mode.join(self.config.render_modes, mark.modes)
-    if not env.mode.is(self.mode, show) then
+    if not env.mode.is(self.mode, show) and not (self.native_mode and env.mode.is('n', show)) then
         return true
     end
 

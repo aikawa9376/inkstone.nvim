@@ -41,7 +41,7 @@ local function append(line, unit)
 end
 -- Width always wins when an extremely narrow column makes kinsoku impossible.
 -- Otherwise prefer a phrase/word boundary, then a legal character boundary.
-function M.wrap(units, width, options)
+local function ranges(units, width, options, continuation, trim)
     options = options or {}
     assert(type(width) == 'number' and width >= 1, 'wrap width must be positive')
     local preferred = preferences(units, options)
@@ -52,6 +52,8 @@ function M.wrap(units, width, options)
             and (not units[index + 1] or not no_start[units[index + 1].text])
     end
     while first <= #units do
+        local content = first
+        while units[content] and str.whitespace(units[content].text) do content = content + 1 end
         local last, used = first - 1, 0
         while last < #units and used + units[last + 1].width <= width do
             last = last + 1
@@ -63,18 +65,39 @@ function M.wrap(units, width, options)
             for index = last, first, -1 do
                 if legal(index) then
                     safe = safe or index
-                    if preferred[index] then safe = index; break end
+                    if preferred[index] and (trim or index >= content) then safe = index; break end
                 end
             end
             last = safe or last
         end
         local finish = last
-        while finish >= first and str.whitespace(units[finish].text) do finish = finish - 1 end
-        local line = {}
-        for index = first, finish do append(line, units[index]) end
-        result[#result + 1] = line
+        if trim then
+            while finish >= first and str.whitespace(units[finish].text) do finish = finish - 1 end
+        end
+        used = 0
+        for index = first, last do used = used + units[index].width end
+        result[#result + 1] = { first = first, last = finish, width = used, available = width }
         first = last + 1
-        while first <= #units and str.whitespace(units[first].text) do first = first + 1 end
+        if trim then
+            while first <= #units and str.whitespace(units[first].text) do first = first + 1 end
+        end
+        width = continuation or width
+    end
+    return result
+end
+
+-- Source-backed wrapping must retain whitespace and byte positions. The first
+-- screen row can have a different budget from rows with breakindent/showbreak.
+function M.softwrap(units, first_width, continuation_width, options)
+    return ranges(units, first_width, options, continuation_width, false)
+end
+
+function M.wrap(units, width, options)
+    local result = {}
+    for _, range in ipairs(ranges(units, width, options, nil, true)) do
+        local line = {}
+        for index = range.first, range.last do append(line, units[index]) end
+        result[#result + 1] = line
     end
     return #result > 0 and result or { {} }
 end

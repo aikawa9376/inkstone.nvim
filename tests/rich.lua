@@ -39,7 +39,7 @@ return function(test, equal, buffer)
         test(name, callback)
     end
 
-    test('paragraph reflow retains each transcript row prefix and complete UTF-8 chunks', function()
+    test('native paragraph wrapping retains transcript source and complete UTF-8 boundaries', function()
         local header = '─ 󰭹 Codex 6.1 Sol High · 2026-10-29 11:58 ──────────────────'
         local short = ' 分離しました。既定は次のとおりです。'
         local long = ' ' .. ('長い本文も自然な文節で折り返して表示します。'):rep(8)
@@ -50,28 +50,19 @@ return function(test, equal, buffer)
         env.win.width = function() return 60 end
         local marks, ctx = render()
         env.win.width = context_width
+        local expected, offset = {}, 0
+        local wrapped = require('inkstone.text').wrap(long, 60)
+        for i, line in ipairs(wrapped) do
+            offset = offset + #line
+            local padding = 60 - vim.fn.strdisplaywidth(line)
+            if i < #wrapped and padding > 0 then expected[offset] = (' '):rep(padding) end
+        end
         local actual = {}
         for _, mark in ipairs(marks) do
-            assert(not mark.replace or mark.start_row ~= 0, 'fitting header/body must retain source rows')
-            for _, line in ipairs(mark.replace or {}) do
-                local chunks = {}
-                for _, chunk in ipairs(line) do
-                    for _, cluster in ipairs(require('inkstone.text.grapheme').split(chunk[1])) do
-                        assert(cluster:byte() < 128 or #cluster > 1,
-                            'a highlight boundary split a UTF-8 character')
-                    end
-                    chunks[#chunks + 1] = chunk[1]
-                end
-                local text = table.concat(chunks)
-                assert(vim.fn.strdisplaywidth(text) <= 60, vim.inspect({ text, vim.fn.strdisplaywidth(text), line }))
-                actual[#actual + 1] = text
-            end
-        end
-        local expected = {}
-        for _, source in ipairs({ long, header, short }) do
-            local prefix = source:match('^ *')
-            for _, line in ipairs(require('inkstone.text').wrap(source:sub(#prefix + 1), 60 - #prefix)) do
-                expected[#expected + 1] = prefix .. line
+            assert(not mark.replace, 'native paragraphs must retain source rows')
+            if mark.start_row == 3 and mark.opts.virt_text_pos == 'inline' then
+                assert(long:byte(mark.start_col + 1) >= 0xC0, 'a wrap boundary split a UTF-8 character')
+                actual[mark.start_col] = mark.opts.virt_text[1][1]
             end
         end
         equal(actual, expected)
