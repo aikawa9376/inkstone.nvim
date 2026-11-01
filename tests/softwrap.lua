@@ -60,15 +60,85 @@ return function(test, equal)
         end
     ]=], vim.fn.getcwd(), vim.env.INKSTONE_PARSER_RTP)
 
+    test('ordinary Markdown buffers skip long details with default source and screen mappings', function()
+        for _, anti in ipairs({ false, true }) do
+            lua([=[
+                local lines = { 'BEFORE', '', '<details>', '', '<summary>Long details</summary>', '', '```lua' }
+                for i = 1, 800 do lines[#lines + 1] = 'print(' .. i .. ')' end
+                vim.list_extend(lines, { '```', '', '</details>', '', 'AFTER' })
+                setup(lines, { anti_conceal = { enabled = ... } })
+            ]=], anti)
+            for _, spec in ipairs({ { 3, 'j', 811 }, { 811, 'k', 3 }, { 2, '2j', 811 },
+                { 812, '2k', 3 }, { 3, 'gj', 811 }, { 811, 'gk', 3 },
+                { 3, '<Down>', 811 }, { 811, '<Up>', 3 } }) do
+                lua('vim.api.nvim_win_set_cursor(0, { ..., 0 }); refresh()', spec[1])
+                rpc('nvim_input', spec[2])
+                lua([=[
+                    local target = ...
+                    assert(vim.wait(1000, function() return vim.api.nvim_win_get_cursor(0)[1] == target end, 5),
+                        'default fold movement stopped inside concealed source at ' .. vim.api.nvim_win_get_cursor(0)[1])
+                ]=], spec[3])
+            end
+        end
+    end)
+
+    test('default movement crosses the real upstream configuration details beyond the viewport', function()
+        local range = lua([=[
+            setup(vim.fn.readfile('doc/upstream-configuration.md'))
+            local buf, folds = vim.api.nvim_get_current_buf(), require('inkstone.core.folds')
+            local parser = vim.treesitter.get_parser(buf, 'markdown')
+            parser:parse(true)
+            for _, block in ipairs(folds.blocks(buf, parser, require('inkstone.state').get(buf).folds)) do
+                if block.kind == 'details' and block.title == 'Default Configuration' then
+                    assert(block.end_row - block.start_row > 800)
+                    vim.api.nvim_win_set_cursor(0, { block.start_row + 1, 0 })
+                    refresh()
+                    return { block.start_row + 1, block.end_row + 1 }
+                end
+            end
+            error('long upstream details fixture not found')
+        ]=])
+        for _, spec in ipairs({ { 'j', range[2] }, { 'k', range[1] } }) do
+            rpc('nvim_input', spec[1])
+            lua([=[
+                local target = ...
+                assert(vim.wait(1000, function() return vim.api.nvim_win_get_cursor(0)[1] == target end, 5),
+                    'long upstream details trapped default movement')
+            ]=], spec[2])
+        end
+    end)
+
+    test('default screen mappings retain soft-wrap movement, raw fallback and native operators', function()
+        lua([=[
+            setup({ ('abcdefgh'):rep(10), '<details>', '<summary>Title</summary>', '', 'body', '</details>', 'AFTER' },
+                { paragraph = { wrap = false } })
+        ]=])
+        for _, spec in ipairs({ { 'gj', 1, 24 }, { 'gk', 1, 0 }, { '2gj', 1, 48 } }) do
+            rpc('nvim_input', spec[1])
+            lua([=[
+                local row, col = ...
+                assert(vim.wait(1000, function() return vim.deep_equal(vim.api.nvim_win_get_cursor(0), { row, col }) end, 5))
+            ]=], spec[2], spec[3])
+        end
+        lua('vim.api.nvim_win_set_cursor(0, { 2, 0 }); refresh()')
+        rpc('nvim_input', 'yj')
+        lua([=[
+            assert(vim.wait(1000, function() return vim.fn.getreg('"') == '<details>\n<summary>Title</summary>\n' end, 5),
+                'Normal-mode movement mapping changed an operator motion')
+            require('inkstone').disable()
+            assert(vim.wait(1000, function() return #vim.api.nvim_buf_get_extmarks(0, require('inkstone.core.ui').ns, 0, -1, {}) == 0 end, 5))
+            vim.api.nvim_win_set_cursor(0, { 2, 0 })
+        ]=])
+        rpc('nvim_input', 'j')
+        lua('assert(vim.wait(1000, function() return vim.api.nvim_win_get_cursor(0)[1] == 3 end, 5))')
+    end)
+
     test('fold motions skip long hidden code and details, preserve counts and leave raw views native', function()
         local result = lua([=[
             local lines = { 'BEFORE', '', '<details>', '', '<summary>Heading Configuration</summary>', '', '```lua' }
             for i = 1, 800 do lines[#lines + 1] = 'print(' .. i .. ')' end
             vim.list_extend(lines, { '```', '', '</details>', '', 'AFTER' })
             setup(lines)
-            require('inkstone.core.command').init()
-            vim.keymap.set('n', 'j', '<Plug>(InkstoneMoveDown)', { buffer = true })
-            vim.keymap.set('n', 'k', '<Plug>(InkstoneMoveUp)', { buffer = true })
             local folds = require('inkstone.core.folds')
             local result = { positions = {}, foldmethod = vim.wo.foldmethod }
             local function move(row, keys)

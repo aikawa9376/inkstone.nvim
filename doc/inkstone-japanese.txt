@@ -80,9 +80,11 @@ GIF/video previews depend on installed converters; playback is not provided.
 Blank lines between details and summary tags are supported. Toggling from a
 hidden child opens its collapsed parent first.
 <Plug>(InkstoneMoveDown) and <Plug>(InkstoneMoveUp) skip hidden fold rows in
-Normal mode, with counts. Map them to buffer-local j/k in Markdown buffers;
-the side preview provides these mappings automatically. Native j/k and gj/gk
-can enter concealed source rows. Operators and Visual mode stay native.
+Normal mode, with counts. All attached buffers automatically map j/k, gj/gk
+and Up/Down to skip hidden fold rows, including ordinary Markdown and previews.
+No extra mappings are needed. gj/gk preserve screen-line movement through soft
+wraps; raw/disabled views, operators and Visual mode stay native. on.attach can
+override the buffer-local defaults.
 :Inkstone move_down / move_up and the corresponding Lua functions are also available.
 
 TABLE VIEWS

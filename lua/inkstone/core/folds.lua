@@ -197,15 +197,26 @@ function M.toggle(buf, win)
     return true
 end
 
--- Explicit Normal-mode motions: count visible source rows and skip only fold
--- conceal marks that are actually displayed. Raw/editing views remain native.
+function M.attach(buf)
+    for key, direction in pairs({ j = 1, k = -1, gj = 1, gk = -1, ['<Down>'] = 1, ['<Up>'] = -1 }) do
+        local screen = key == 'gj' or key == 'gk'
+        vim.keymap.set('n', key, function() M.move(direction, nil, screen) end, {
+            buffer = buf, desc = 'Move past hidden Markdown fold rows',
+        })
+    end
+end
+
+-- Normal-mode source/screen motions skip only displayed fold conceal marks.
+-- Raw/editing views remain native; operators and Visual mappings are untouched.
 ---@param direction integer
 ---@param count? integer
-function M.move(direction, count)
+---@param screen? boolean
+function M.move(direction, count, screen)
     local buf = vim.api.nvim_get_current_buf()
+    local config = require('inkstone.state').get(buf)
     local decorator = require('inkstone.core.ui').cache[buf]
     local ranges = {}
-    if decorator and vim.wo.conceallevel >= 2 then
+    if config.enabled and config.folds.enabled and decorator and vim.wo.conceallevel >= 2 then
         for _, extmark in ipairs(decorator:get()) do
             local mark = extmark:get()
             if mark.fold_hidden and extmark:shown() then
@@ -213,7 +224,7 @@ function M.move(direction, count)
             end
         end
     end
-    local motion = direction > 0 and 'j' or 'k'
+    local motion = (screen and 'g' or '') .. (direction > 0 and 'j' or 'k')
     if #ranges == 0 then
         vim.cmd.normal({ args = { tostring(count or vim.v.count1) .. motion }, bang = true })
         return

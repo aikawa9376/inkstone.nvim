@@ -385,8 +385,7 @@ in this demo. `:checkhealth inkstone` reports typography and converter availabil
 `:Inkstone toggle_fold` toggles the innermost visible code fence, callout or
 `<details>` block containing the cursor. A cursor inside a collapsed parent
 opens that parent before its hidden children can be toggled. It changes display
-state without taking over Neovim's `foldmethod`, editing source or replacing
-existing keybindings.
+state without taking over Neovim's `foldmethod` or editing source.
 
 ```lua
 require('inkstone').setup({
@@ -403,24 +402,16 @@ its title; blank lines before the summary are allowed. Nested details are
 supported. Toggle state follows inserted lines using buffer-local extmark
 anchors and is released on buffer wipe/setup.
 
-Line concealment leaves source rows addressable by native `j/k` and `gj/gk`.
-For long folds, map the Normal-mode actions below in Markdown buffers. They
-skip currently hidden fold bodies, summary tags and closing details tags,
-and support counts such as `2j`. They retain native movement when the source
-view is active. Operators and Visual-mode motions keep their existing behavior.
-The side preview installs these `j/k` mappings automatically.
+Attached buffers, including ordinary Markdown buffers and the side preview,
+automatically have Normal-mode, buffer-local `j/k`, `gj/gk` and Up/Down mappings
+that skip hidden fold bodies, summary tags and closing details tags. Additional
+key configuration is not required. Counts such as `2j` and `2gj` are supported;
+`gj/gk` retain native screen-line movement through soft wraps. Raw views and
+disabled rendering retain native movement. Operators and Visual-mode motions
+keep their existing behavior. Override these defaults in `on.attach` if needed.
 
-```lua
-vim.api.nvim_create_autocmd('FileType', {
-    pattern = 'markdown',
-    callback = function(event)
-        vim.keymap.set('n', 'j', '<Plug>(InkstoneMoveDown)', { buffer = event.buf })
-        vim.keymap.set('n', 'k', '<Plug>(InkstoneMoveUp)', { buffer = event.buf })
-    end,
-})
-```
-
-The equivalent Lua functions are `require('inkstone').move_down()` and
+`<Plug>(InkstoneMoveDown)` / `<Plug>(InkstoneMoveUp)` remain available for other
+key choices, with Lua equivalents `require('inkstone').move_down()` and
 `require('inkstone').move_up()`.
 
 ## ACP tables

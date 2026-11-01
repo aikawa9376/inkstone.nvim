@@ -174,16 +174,22 @@ collapsed ancestor, so source motions into its hidden code cannot toggle that
 child. Closed code folds retain a visible delimiter/summary anchor even without
 a language label.
 
-`folds.move` backs the opt-in Normal-mode `InkstoneMoveDown` / `InkstoneMoveUp`
-Plug mappings. It reads only displayed `fold_hidden` marks from the decorator,
-skips those inclusive ranges, and counts visible source rows. Mode/anti-conceal
+`folds.attach` installs buffer-local Normal-mode `j/k`, `gj/gk` and Up/Down
+defaults in all attached buffers before `on.attach`, so user overrides remain
+possible. `folds.move` backs these defaults and the `InkstoneMoveDown` /
+`InkstoneMoveUp` Plug mappings. It reads only displayed `fold_hidden` marks from
+the decorator, skips those inclusive ranges, and counts source or screen rows
+according to the initiating motion. Mode/anti-conceal
 restoration therefore makes the motions native without reparsing trees. Jumps
 retain the preferred column, respect native folds and stop at the anchor when
-a collapsed block reaches EOF. Source buffers retain their existing `j/k` mappings;
-the side preview maps `j/k` locally. It does not set the user's foldmethod.
+a collapsed block reaches EOF. Raw/disabled views use native motions. It does
+not set the user's foldmethod, operator-pending maps or Visual maps.
 `tests/features.lua` covers summary extraction, parent selection and code
 anchors; `tests/softwrap.lua` exercises actual grid output and mapped motions
 through an 800-line details/code block, counts, raw fallback and native folds.
+The ordinary-buffer regression sends actual `j/k`, `gj/gk` and arrow input
+without test-installed movement mappings, with anti-conceal both enabled and
+disabled. Soft-wrap and operator tests retain native screen/source semantics.
 
 `core/media.lua` collects visible image/diagram requests after folding,
 uses async local conversion and
