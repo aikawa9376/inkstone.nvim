@@ -11,6 +11,7 @@ function M.parse(ctx)
     -- stylua: ignore
     local query = ts.parse('markdown', [[
         (fenced_code_block) @code
+        (indented_code_block) @code
 
         [
             (thematic_break)

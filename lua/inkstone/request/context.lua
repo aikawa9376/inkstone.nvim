@@ -19,6 +19,9 @@ local str = require('inkstone.lib.str')
 ---@field cell_images? table<integer, table[]>
 ---@field table_media? table[]
 ---@field table_image_ranges? render.md.Range[]
+---@field syntax_active boolean
+---@field code_trees? table[]
+---@field code_syntax_seen? table<string, boolean>
 local Context = {}
 Context.__index = Context
 
@@ -43,6 +46,7 @@ function Context.new(buf, win, config, view)
     self.used = require('inkstone.request.used').new()
     self.tables = {}
     self.typography = {}
+    self.syntax_active = vim.treesitter.highlighter.active[buf] ~= nil
     return self
 end
 

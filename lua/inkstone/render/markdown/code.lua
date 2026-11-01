@@ -26,7 +26,7 @@ function Render:setup()
         return false
     end
     -- skip single line code block
-    if self.node:height() <= 2 then
+    if self.node.type == 'fenced_code_block' and self.node:height() < 2 then
         return false
     end
 
@@ -90,7 +90,14 @@ end
 ---@protected
 function Render:run()
     local start_row = self.node.start_row
-    local end_row = self.node.end_row - 1
+    local end_row = self.node.end_row - (self.node.end_col == 0 and 1 or 0)
+
+    if self.node.type == 'indented_code_block' then
+        local background = self:enabled(self.config.disable_background)
+        if background then self:background(start_row, end_row) end
+        self:padding(background)
+        return
+    end
 
     local above = self.node:child('fenced_code_block_delimiter', start_row)
     local below = self.node:child('fenced_code_block_delimiter', end_row)
@@ -109,9 +116,10 @@ function Render:run()
     local background = self:enabled(self.config.disable_background)
     if background then
         local inset = self.config.background_inset
-        self:background(start_row + inset, end_row - inset)
+        self:background(start_row + inset, end_row - (below and inset or 0))
     end
     self:padding(background)
+    require('inkstone.core.code_syntax').render(self.context, self.node, self.marks, self.config)
 end
 
 ---@private
@@ -263,7 +271,9 @@ end
 ---@param background boolean
 function Render:padding(background)
     local col = self.node.start_col
-    local start_row, end_row = self.node.start_row, self.node.end_row - 1
+    local start_row = self.node.start_row
+    local end_row = self.node.end_row - (self.node.end_col == 0 and 1 or 0)
+    local closing = self.node:child('fenced_code_block_delimiter', end_row)
     if col == 0 and self.data.margin <= 0 and self.data.padding <= 0 then return end
     local highlight = background and self.config.highlight or nil
     self:each_visible(start_row, end_row, function(first, last)
@@ -274,7 +284,7 @@ function Render:padding(background)
                 line:pad(col)
             end
             line:pad(self.data.margin)
-            if row > start_row and row < end_row then
+            if self.node.type == 'indented_code_block' or (row > start_row and (row < end_row or not closing)) then
                 line:pad(self.data.padding, highlight)
             end
             if not line:empty() then

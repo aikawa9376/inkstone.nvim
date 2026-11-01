@@ -98,6 +98,7 @@ function Updater:changed()
     return self.force
         or self.decorator:changed()
         or not Context.contains(self.buf, self.win)
+        or (Context.cache[self.buf] and Context.cache[self.buf].syntax_active ~= (vim.treesitter.highlighter.active[self.buf] ~= nil))
 end
 
 ---@private
@@ -178,6 +179,7 @@ end
 function Updater:parse(callback)
     local ok, parser = pcall(vim.treesitter.get_parser, self.buf)
     if ok and parser then
+        require('inkstone.core.code_syntax').prepare(self.buf, parser)
         -- reset buffer context
         local context = Context.new(self.buf, self.win, self.config)
         if context then

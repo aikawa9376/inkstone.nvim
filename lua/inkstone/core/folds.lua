@@ -4,6 +4,33 @@ local function text(buf, node)
     return vim.treesitter.get_node_text(node, buf)
 end
 
+local function summary(buf, opening, finish)
+    local inline = opening.line:match('>[ \t]*(<[sS][uU][mM][mM][aA][rR][yY].*)')
+    local row = opening.row
+    local line = inline
+    if not line then
+        row = row + 1
+        while row < finish do
+            line = vim.api.nvim_buf_get_lines(buf, row, row + 1, false)[1] or ''
+            if not line:match('^%s*$') then break end
+            row = row + 1
+        end
+    end
+    local body = (line or ''):match('^%s*<[sS][uU][mM][mM][aA][rR][yY][^>]*>(.*)$')
+    if not body then return end
+    local first, parts = row, {}
+    while row < finish do
+        local last = body:match('^(.-)</[sS][uU][mM][mM][aA][rR][yY]>%s*$')
+        parts[#parts + 1] = last or body
+        if last then
+            local title = vim.trim(table.concat(parts, ' '):gsub('<[^>]+>', ''):gsub('%s+', ' '))
+            return title ~= '' and title or 'Details', row > opening.row and row or nil, math.max(opening.row + 1, first)
+        end
+        row = row + 1
+        body = vim.api.nvim_buf_get_lines(buf, row, row + 1, false)[1] or ''
+    end
+end
+
 -- Return half-open source ranges, never treating fence contents as HTML.
 function M.blocks(buf, parser, config, view)
     local roots, identities = {}, {}
@@ -37,9 +64,14 @@ function M.blocks(buf, parser, config, view)
                 seen[key] = true
                 if kind == 'html' and config.details then
                     local lines = vim.split(text(buf, node), '\n', { plain = true })
+                    local fence, fence_size
                     for i, line in ipairs(lines) do
                         local lower = line:lower()
-                        if lower:match('^%s*</?details[%s>]') then
+                        local marker, rest = line:match('^%s*([`~]+)(.*)$')
+                        if marker and #marker >= 3 and not marker:find(marker:sub(1, 1) == '`' and '~' or '`', 1, true) then
+                            if not fence then fence, fence_size = marker:sub(1, 1), #marker
+                            elseif marker:sub(1, 1) == fence and #marker >= fence_size and rest:match('^%s*$') then fence = nil end
+                        elseif not fence and lower:match('^%s*</?details[%s>]') then
                             tags[#tags + 1] = { row = sr + i - 1, line = line, close = lower:match('^%s*</') ~= nil }
                         end
                     end
@@ -64,24 +96,11 @@ function M.blocks(buf, parser, config, view)
                 stack[#stack + 1] = tag
             elseif #stack > 0 then
                 local opening = table.remove(stack)
-                local inline_summary = opening.line:match('>[ \t]*(<[sS][uU][mM][mM][aA][rR][yY].*)')
-                local summary_row = opening.row + 1
-                local summary = inline_summary
-                if not summary then
-                    -- Markdown commonly separates the HTML tags with blank lines.
-                    while summary_row < tag.row do
-                        summary = vim.api.nvim_buf_get_lines(buf, summary_row, summary_row + 1, false)[1] or ''
-                        if not summary:match('^%s*$') then break end
-                        summary_row = summary_row + 1
-                    end
-                end
-                summary = summary or ''
-                local title = summary:match('^%s*<[sS][uU][mM][mM][aA][rR][yY][^>]*>(.-)</[sS][uU][mM][mM][aA][rR][yY]>%s*$')
+                local title, summary_row, summary_start = summary(buf, opening, tag.row)
                 blocks[#blocks + 1] = {
                     kind = 'details', start_row = opening.row, end_row = tag.row + 1,
                     closed = not opening.line:lower():match('%sopen[%s=>]'),
-                    title = title and title:gsub('<[^>]+>', '') or 'Details',
-                    summary_row = title and not inline_summary and summary_row or nil,
+                    title = title or 'Details', summary_row = summary_row, summary_start = summary_start,
                 }
             end
         end
@@ -117,6 +136,14 @@ function M.apply(context, parser, marks)
         extra[#extra + 1] = { conceal = true, modes = config.render_modes, start_row = row, start_col = col or 0,
             fold_hidden = opts.conceal_lines ~= nil, opts = opts }
     end
+    local function hide_tag(row, overlay_only)
+        local line = vim.api.nvim_buf_get_lines(context.buf, row, row + 1, false)[1] or ''
+        local opts = { end_col = #line, virt_text_pos = 'overlay',
+            virt_text = { { string.rep(' ', vim.fn.strdisplaywidth(line)), 'InkstoneDetailsBody' } } }
+        if not overlay_only then opts.conceal_lines = '' end
+        add(row, opts)
+        extra[#extra].conceal = false
+    end
     for _, block in ipairs(blocks) do
         local inside = false
         for _, range in ipairs(hidden) do
@@ -134,16 +161,34 @@ function M.apply(context, parser, marks)
                 local first = vim.api.nvim_buf_get_lines(context.buf, block.start_row, block.start_row + 1, false)[1] or ''
                 local label = closed and {
                     { ('▶ %d lines'):format(block.end_row - block.start_row - 1), 'Comment' },
-                    { ' · ' .. block.title, 'InkstoneLink' },
-                } or { { '▼ ' .. block.title, 'InkstoneLink' } }
-                add(block.start_row, { end_col = #first, conceal = '', virt_text_pos = 'inline',
-                    virt_text = label })
-                if closed then extra[#extra].conceal = false end
+                    { ' · ' .. block.title, 'InkstoneDetailsHeader' },
+                } or { { '▼ ' .. block.title, 'InkstoneDetailsHeader' } }
+                local width = require('inkstone.lib.str').line_width(label)
+                local padding = math.max(0, vim.fn.strdisplaywidth(first) - width)
+                if padding > 0 then label[#label + 1] = { string.rep(' ', padding), 'InkstoneDetailsBody' } end
+                -- Overlay the HTML wrapper so concealcursor cannot expose the
+                -- raw tag beside a retained interactive header.
+                add(block.start_row, { end_row = block.start_row + 1, end_col = 0, virt_text_pos = 'overlay',
+                    hl_group = 'InkstoneDetailsBody', hl_eol = true, priority = 150,
+                    hl_mode = 'combine', virt_text = label })
+                extra[#extra].conceal = false
                 if not closed then
                     if block.summary_row then
                         add(block.start_row + 1, { end_row = block.summary_row, end_col = 0, conceal_lines = '' })
+                        extra[#extra].conceal = false
+                        for row = block.summary_start or block.summary_row, block.summary_row do hide_tag(row, true) end
                     end
-                    add(block.end_row - 1, { conceal_lines = '' })
+                    hide_tag(block.end_row - 1)
+                    local first_body = (block.summary_row or block.start_row) + 1
+                    for _, visible in ipairs(context.view.ranges) do
+                        local sr, er = math.max(first_body, visible[1]), math.min(block.end_row - 1, visible[2])
+                        if sr < er then
+                            add(sr, { end_row = er, end_col = 0, hl_group = 'InkstoneDetailsBody',
+                                hl_eol = true, priority = 80 })
+                            extra[#extra].conceal = false
+                            extra[#extra].details_body = true
+                        end
+                    end
                 end
             elseif closed and block.kind == 'code' then
                 local first = vim.api.nvim_buf_get_lines(context.buf, block.start_row, block.start_row + 1, false)[1] or ''

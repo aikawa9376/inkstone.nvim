@@ -452,6 +452,7 @@ end
 M.code = {}
 
 ---@class (exact) render.md.code.Config: render.md.base.Config
+---@field syntax boolean
 ---@field sign boolean
 ---@field conceal_delimiters boolean
 ---@field language boolean
@@ -520,6 +521,8 @@ M.code.style = {
 
 ---@type render.md.code.Config
 M.code.default = {
+    -- Use parsed code-language highlights even without a native highlighter.
+    syntax = true,
     -- Turn on / off code block & inline code rendering.
     enabled = true,
     -- Additional modes to render code blocks.
@@ -622,6 +625,7 @@ M.code.default = {
 ---@return render.md.Schema
 function M.code.schema()
     return M.base.schema({
+        syntax = { type = 'boolean' },
         sign = { type = 'boolean' },
         conceal_delimiters = { type = 'boolean' },
         language = { type = 'boolean' },

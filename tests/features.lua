@@ -338,6 +338,121 @@ return function(test, equal, buffer)
         vim.api.nvim_buf_delete(buf, { force = true })
     end)
 
+    test('details render Markdown and code colors with or without blank HTML separators', function()
+        local body = { '# Inside', '| Name | Value |', '| --- | --- |', '| A | B |',
+            '- [x] Task', '[link](https://example.com)', '```lua', 'local answer = 42', '```' }
+        for _, spaced in ipairs({ false, true }) do
+            local lines = { '<details open>', '<summary><strong>Title</strong></summary>' }
+            if spaced then lines[#lines + 1] = '' end
+            vim.list_extend(lines, body)
+            if spaced then lines[#lines + 1] = '' end
+            lines[#lines + 1] = '</details>'
+            local buf, parser, ctx, marks = parse(lines)
+            local found = {}
+            for _, mark in ipairs(marks) do found[tostring(mark.conceal)] = true end
+            assert(found.head_icon and found.table_border and found.check_icon and found.link and found.code_background,
+                'details must retain every normal Markdown component: ' .. vim.inspect(found))
+            local blocks = folds.blocks(buf, parser, ctx.config.folds)
+            equal(#blocks, 2)
+            equal(blocks[1].title, 'Title')
+            local lua_tree = false
+            parser:for_each_tree(function(_, language) lua_tree = lua_tree or language:lang() == 'lua' end)
+            assert(lua_tree, 'details code must have its normal Lua injection')
+            assert(vim.iter(marks):any(function(mark) return mark.details_body end))
+            equal(vim.api.nvim_buf_get_lines(buf, 0, -1, false), lines)
+            vim.api.nvim_buf_delete(buf, { force = true })
+        end
+    end)
+
+    test('details injections leave standalone HTML and HTML code examples literal', function()
+        local buf = buffer({ '<details open>', '<summary>Title</summary>', '# Literal HTML body', '</details>' })
+        vim.bo[buf].filetype = 'html'
+        local parser = vim.treesitter.get_parser(buf, 'html')
+        parser:parse(true)
+        parser:for_each_tree(function(_, language) assert(language:lang() ~= 'markdown') end)
+        vim.api.nvim_buf_delete(buf, { force = true })
+        buf, parser = parse({ '```html', '<details open>', '<summary>Title</summary>', '# Literal example', '</details>', '```' })
+        equal(vim.tbl_map(function(block) return block.kind end, folds.blocks(buf, parser, require('inkstone.state').get(buf).folds)), { 'code' })
+        vim.api.nvim_buf_delete(buf, { force = true })
+        local ctx, marks
+        buf, parser, ctx, marks = parse({ '<details open>', '<summary>Outer</summary>', '```html',
+            '<details>', '<summary>Literal</summary>', '# Literal example', '</details>', '```', '</details>' })
+        equal(vim.tbl_map(function(block) return block.kind end, folds.blocks(buf, parser, ctx.config.folds)), { 'details', 'code' })
+        for _, mark in ipairs(marks) do assert(mark.conceal ~= 'head_icon', 'HTML example inside details must stay literal') end
+        vim.api.nvim_buf_delete(buf, { force = true })
+    end)
+
+    test('code syntax fallback covers aliases, details and viewport ranges without duplicating a native highlighter', function()
+        local cases = { { 'lua', 'lua', 'local answer = 42' }, { 'sh', 'bash', 'echo "hello"' },
+            { 'py', 'python', 'answer = 42' }, { 'js', 'javascript', 'const answer = 42;' },
+            { 'ts', 'typescript', 'const answer: number = 42;' }, { 'yml', 'yaml', 'answer: 42' } }
+        for _, case in ipairs(cases) do
+            if pcall(vim.treesitter.language.add, case[2]) then
+                local lines = { '<details open>', '<summary>Code</summary>', '', '```' .. case[1], case[3], '```', '', '</details>' }
+                local buf, parser, ctx = parse(lines)
+                local function colors(native, enabled)
+                    if native then vim.treesitter.start(buf, 'markdown') else vim.treesitter.stop(buf) end
+                    ctx = Context.new(buf, vim.api.nvim_get_current_win(), require('inkstone.state').get(buf))
+                    ctx.config.code.syntax = enabled
+                    ctx.view.ranges = { { 0, #lines } }
+                    local found = {}
+                    for _, mark in ipairs(require('inkstone.core.handlers').run(ctx, parser)) do
+                        if type(mark.opts.hl_group) == 'string' and mark.opts.hl_group:sub(1, 1) == '@' then
+                            assert(mark.start_row == 4, 'syntax highlights escaped the code content')
+                            found[#found + 1] = mark
+                        end
+                    end
+                    return found
+                end
+                assert(#colors(false, true) > 0, 'missing syntax fallback for ' .. case[1])
+                equal(#colors(true, true), 0)
+                equal(#colors(false, false), 0)
+                equal(vim.api.nvim_buf_get_lines(buf, 0, -1, false), lines)
+                vim.api.nvim_buf_delete(buf, { force = true })
+            end
+        end
+        local lines = { '```lua', '--[[' }
+        for _ = 1, 1000 do lines[#lines + 1] = 'comment text' end
+        vim.list_extend(lines, { ']]', '```' })
+        local buf, parser = parse(lines)
+        vim.treesitter.stop(buf)
+        local ctx = Context.new(buf, vim.api.nvim_get_current_win(), require('inkstone.state').get(buf))
+        ctx.view.ranges = { { 10, 12 }, { 700, 702 } }
+        local rows = {}
+        for _, mark in ipairs(require('inkstone.core.handlers').run(ctx, parser)) do
+            if mark.opts.hl_group == '@comment.lua' then rows[#rows + 1] = mark.start_row end
+        end
+        table.sort(rows)
+        equal(rows, { 10, 11, 700, 701 })
+        vim.api.nvim_buf_delete(buf, { force = true })
+    end)
+
+    test('code decoration covers indented blocks, open fences and final rows without a newline', function()
+        for _, lines in ipairs({ { '```lua', 'local answer = 42' },
+            { '```lua', 'local answer = 42', '```' }, { '    local answer = 42' } }) do
+            local buf, parser, ctx = parse(lines, { code = { width = 'block', left_pad = 1, right_pad = 1 } })
+            vim.bo[buf].endofline = false
+            parser:parse(true)
+            local marks = require('inkstone.core.handlers').run(ctx, parser)
+            local body = #lines == 1 and 0 or 1
+            local background = false
+            for _, mark in ipairs(marks) do
+                background = background or (mark.start_row == body and mark.conceal == 'code_background')
+            end
+            assert(background, 'code body lost its background at EOF: ' .. vim.inspect(lines))
+            equal(vim.api.nvim_buf_get_lines(buf, 0, -1, false), lines)
+            vim.api.nvim_buf_delete(buf, { force = true })
+        end
+    end)
+
+    test('code language aliases preserve user registrations', function()
+        local before = vim.treesitter.language.get_lang('js')
+        vim.treesitter.language.register('lua', 'js')
+        require('inkstone.core.code_syntax').register()
+        equal(vim.treesitter.language.get_lang('js'), 'lua')
+        vim.treesitter.language.register(before, 'js')
+    end)
+
     test('folds distinguish fences, callouts and nested details and follow source edits', function()
         local lines = { 'BEFORE', '', '```html', '<details>', 'not a fold', '</details>', '```', '',
             '> [!NOTE]- Collapsed', '> callout body', '', '<details>', '<summary>Outer</summary>', '',

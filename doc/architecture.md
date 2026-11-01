@@ -34,6 +34,23 @@ host remains eligible. Outer code backgrounds/borders and native syntax
 highlighting remain available; `nested = true` opts back into inner rendering.
 Width-preserving display compatibility corrections still apply to source text.
 
+`queries/markdown/injections.scm` extends the native injection query for compact
+details bodies that Markdown otherwise consumes as an opaque `html_block`.
+`core/ts.lua` registers a predicate and range directive that exclude the opening
+and summary tags and final closing tag. The body remains one contiguous source
+range, so fences containing literal HTML tags parse correctly. Injecting separate
+HTML text nodes would split those fences. Ordinary blank-separated Markdown
+continues to use its native captures; no HTML parser is required for this feature.
+
+`core/code_syntax.lua` registers common fence aliases without overriding user
+registrations or actual alias-named parsers. Existing parser injections are
+invalidated once per buffer/alias generation. Code renderers use code-language
+trees from the shared native snapshot for viewport-bounded syntax colors when
+no native highlighter is active; an active highlighter owns its own colors.
+The context records highlighter state so starting/stopping it invalidates marks.
+No parsers are downloaded or source strings reparsed separately. Code syntax
+and plugin rendering within code examples remain separate policies.
+
 ## Performance boundaries
 
 Code-body backgrounds and padding are limited to coalesced viewport ranges.
@@ -180,6 +197,13 @@ rendering; raw/Visual mode still follows the normal render-mode policy.
 Collapsed details use the same count-first control, `▶ N lines · title`, where
 N is the number of hidden source rows (including summary/blank lines and the
 closing tag). It remains visible at the cursor; expanded details keep `▼ title`.
+Details controls overlay the original tag row and pad to its display width, so
+native cursor-line conceal rules cannot expose trailing HTML. Multiline summary
+rows and the closing tag are hidden, with blank overlays for cursor restoration.
+The title uses `InkstoneDetailsHeader`; viewport-clipped body backgrounds use
+`InkstoneDetailsBody` at priority 80, below code backgrounds. These marks remain
+visible under anti-conceal while Normal-mode rendering is active. They add no
+columns to the body and do not alter source bytes.
 Closed body marks carry `fold_closed`: `Updater:hide` ignores anti-conceal
 margin-only overlap when the actual cursor is outside that body. Deliberate
 source entry can still restore it under enabled anti-conceal. Child fold state

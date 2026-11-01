@@ -41,3 +41,7 @@ Its `text_size.lua` was also consulted for OSC 66 lifecycle constraints
 (reserved cells, erasure before native redraw and replay afterward). Inkstone's
 typography implementation is separate and includes stock-tmux passthrough,
 pane offsets and source restoration in the existing rendering pipeline.
+
+Its details header/body presentation and code-language alias/highlight handling
+were consulted when auditing details rendering. Inkstone implements these in
+its own native Tree-sitter, source extmark and folding pipeline.

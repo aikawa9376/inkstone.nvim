@@ -22,7 +22,10 @@ function M.run(context, parser)
     context._width = nil
     local language_roots = {} ---@type table<string, TSNode[]>
     context.view.trees = {}
+    context.code_trees = {}
+    context.code_syntax_seen = {}
     parser:for_each_tree(function(tree, language_tree)
+        if language_tree:parent() then context.code_trees[#context.code_trees + 1] = { tree, language_tree } end
         if require('inkstone.core.ts').render(tree, language_tree) then
             context.view.trees[#context.view.trees + 1] = { tree, language_tree }
         end
@@ -88,6 +91,8 @@ function M.run(context, parser)
     require('inkstone.core.media').collect(context, parser, marks)
     marks = require('inkstone.render.compat').apply(context, marks)
     context.view.trees = nil
+    context.code_trees = nil
+    context.code_syntax_seen = nil
     return marks
 end
 

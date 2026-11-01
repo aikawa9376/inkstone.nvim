@@ -22,6 +22,7 @@ function M.init()
             require('inkstone.core.typography').clear(args.buf)
             require('inkstone.core.media').clear(args.buf)
             require('inkstone.core.folds').clear(args.buf)
+            require('inkstone.core.code_syntax').seen[args.buf] = nil
             local decorator = ui.cache[args.buf]
             if decorator then decorator:dispose() end
             ui.cache[args.buf], state.cache[args.buf] = nil, nil

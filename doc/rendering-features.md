@@ -398,9 +398,24 @@ The side preview has buffer-local `za` and `<CR>` view actions. Code blocks star
 expanded. Obsidian callouts beginning with `> [!NOTE]-` start collapsed;
 `> [!NOTE]+` starts expanded. `<details>` starts collapsed unless it has an
 `open` attribute. A `<summary>` on the opening line or following line supplies
-its title; blank lines before the summary are allowed. Nested details are
+its title; blank lines before the summary and multiline summaries are allowed. Nested details are
 supported. Toggle state follows inserted lines using buffer-local extmark
 anchors and is released on buffer wipe/setup.
+
+While rendered, the `<details>` and `<summary>` wrappers become a styled
+header instead of raw HTML tags, including on the cursor line. The header uses
+`InkstoneDetailsHeader` (linked to `Title`); the expanded body uses
+`InkstoneDetailsBody` (linked to `NormalFloat`). Code backgrounds keep their own
+color. No extra body columns are inserted, so table and code widths stay aligned.
+Visual/raw views retain the original tags. The standard tag is `<details>`;
+the singular `<detail>` is not a details control.
+
+The body retains normal Markdown decorations for headings, lists, tables,
+links and code, even without blank lines after the summary. This uses a
+Markdown body injection and does not require an HTML parser. Standalone HTML
+buffers and fenced HTML examples remain literal; this is not a browser HTML
+layout engine. Inline body text on the same line as the opening/summary tags
+is outside the supported block layout.
 
 Code fences have independent fold state inside details. `Ctrl+i` on code folds
 the code; use the details title to fold the enclosing details. Reopening a
@@ -424,6 +439,27 @@ keep their existing behavior. Override these defaults in `on.attach` if needed.
 `<Plug>(InkstoneMoveDown)` / `<Plug>(InkstoneMoveUp)` remain available for other
 key choices, with Lua equivalents `require('inkstone').move_down()` and
 `require('inkstone').move_up()`.
+
+## Code decoration
+
+Fenced blocks retain their language label, background and padding inside
+details. Open fences and blocks ending without a final newline keep their last
+body row decorated. Indented code blocks receive background and padding; they
+have no declared language to infer syntax colors from.
+
+Language colors use installed Tree-sitter parsers and highlight queries. When
+a native highlighter is active, it owns syntax colors. Otherwise Inkstone uses
+the already parsed code injection trees to color only visible code rows.
+`code.syntax = false` disables this fallback; it does not disable an existing
+native highlighter. Missing parsers or unknown languages retain readable code
+and its block decorations without guessed syntax or automatic downloads.
+
+Common fence aliases include `sh` / `shell` / `zsh` → `bash`, `py` → `python`,
+`js` / `jsx` → `javascript`, `ts` → `typescript`, `yml` → `yaml`,
+`md` → `markdown`, `rb` → `ruby`, `rs` → `rust`, and `ps1` → `powershell`.
+Explicit user language registrations and parsers installed under an alias name
+take precedence. The default `nested = false` still keeps Markdown/HTML source
+examples literal inside code blocks while allowing their syntax colors.
 
 ## ACP tables
 

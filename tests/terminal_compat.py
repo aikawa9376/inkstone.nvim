@@ -329,6 +329,51 @@ class TerminalTests(unittest.TestCase):
                 self.assertNotIn('long-path/', self.visible_text())
                 self.assert_source()
 
+    def test_details_controls_body_and_code_colors_remain_decorated(self):
+        self.render(['BEFORE', '', '<details open>', '<summary>Box</summary>', 'BODY',
+                     '```lua', 'local answer = 42', '```', '</details>', '', 'AFTER'],
+                    wrap=True, conceallevel=3, anti_conceal=True)
+        self.lua('vim.api.nvim_set_hl(0,"InkstoneDetailsHeader",{fg=0xffcc00,bold=true}); '
+                 'vim.api.nvim_set_hl(0,"InkstoneDetailsBody",{bg=0x102030}); '
+                 'vim.api.nvim_set_hl(0,"InkstoneCode",{bg=0x203040}); '
+                 'vim.api.nvim_set_hl(0,"@keyword.lua",{fg=0xff0088}); '
+                 'vim.api.nvim_set_hl(0,"@number.lua",{fg=0x11dd33}); '
+                 'vim.api.nvim_win_set_cursor(0,{3,0}); require("inkstone.api").render({buf=vim.api.nvim_get_current_buf()}); '
+                 'vim.wait(200); vim.cmd("redraw!")')
+        self.pump(.2)
+
+        def check():
+            text = self.visible_text()
+            self.assertIn('▼ Box', text)
+            self.assertNotIn('<details', text)
+            self.assertNotIn('<summary', text)
+            self.assertNotIn('</details', text)
+            header_row = next(row for row in range(24) if '▼ Box' in str(self.screen.line(row)))
+            header = str(self.screen.line(header_row))
+            self.assertEqual(self.screen.line(header_row).cursor_from(header.index('Box')).fg, (0xffcc00 << 8) | 2)
+            body_row = next(row for row in range(24) if 'BODY' in str(self.screen.line(row)))
+            body = str(self.screen.line(body_row))
+            self.assertEqual(self.screen.line(body_row).cursor_from(body.index('BODY')).bg, (0x102030 << 8) | 2)
+            row = next(row for row in range(24) if 'local answer = 42' in str(self.screen.line(row)))
+            line = str(self.screen.line(row))
+            self.assertEqual(self.screen.line(row).cursor_from(line.index('local')).fg, (0xff0088 << 8) | 2)
+            self.assertEqual(self.screen.line(row).cursor_from(line.index('42')).fg, (0x11dd33 << 8) | 2)
+            self.assertEqual(self.screen.line(row).cursor_from(line.index('answer')).bg, (0x203040 << 8) | 2)
+            self.assert_source()
+
+        check()
+        self.lua('vim.treesitter.stop(0); require("inkstone.api").render({buf=vim.api.nvim_get_current_buf()}); '
+                 'vim.wait(200); vim.cmd("redraw!")')
+        self.pump(.2)
+        check()
+        self.lua('require("inkstone.api").toggle_view(); vim.wait(200); vim.cmd("redraw!")')
+        self.pump(.2)
+        self.assertIn('▶ 6 lines', self.visible_text())
+        self.assertNotIn('local answer', self.visible_text())
+        self.lua('require("inkstone.api").toggle_view(); vim.wait(200); vim.cmd("redraw!")')
+        self.pump(.2)
+        check()
+
     def test_details_callout_and_code_folds(self):
         self.render(['BEFORE', '', '<details>', '<summary>Details title</summary>', '', 'Secret detail body', '', '</details>', '',
                      '> [!NOTE]- Note', '> Secret callout body', '', '```lua', 'print("Code body")', '```', '', 'AFTER'], conceallevel=3)

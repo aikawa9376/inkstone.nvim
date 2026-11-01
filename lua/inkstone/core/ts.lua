@@ -41,8 +41,52 @@ function M.render(tree, language_tree)
     return true
 end
 
+-- Reparse the body of a raw Markdown HTML block as one contiguous range.
+-- Injecting individual HTML text nodes would break fences containing tags.
+local function details_body(match, buf, capture)
+    if type(buf) ~= 'number' or not vim.api.nvim_buf_is_valid(buf) then return end
+    local nodes = match[capture]
+    local node = type(nodes) == 'table' and nodes[1] or nodes
+    if not node then return end
+    local sr, _, er, ec = node:range()
+    local function line(row) return vim.api.nvim_buf_get_lines(buf, row, row + 1, false)[1] or '' end
+    local opening = line(sr):lower()
+    if not opening:match('^%s*<details[%s>]') then return end
+    local last = er + (ec > 0 and 1 or 0)
+    local end_row, end_col = er, ec
+    if line(last - 1):lower():match('^%s*</details>%s*$') then
+        last = last - 1
+        end_row, end_col = last, 0
+    end
+    local row, body = sr, opening:match('^%s*<details[^>]*>(.*)$') or ''
+    if body:match('^%s*$') then
+        row = row + 1
+        while row < last and line(row):match('^%s*$') do row = row + 1 end
+        body = line(row):lower()
+    end
+    if body:match('^%s*<summary[%s>]') then
+        while row < last and not body:match('</summary>%s*$') do
+            row = row + 1
+            body = line(row):lower()
+        end
+        row = row + 1
+    elseif row == sr then
+        return -- Inline body text needs byte-aware HTML layout, not a row range.
+    end
+    if row < last then return { row, 0, end_row, end_col } end
+end
+
 ---called from state on setup
 function M.setup()
+    require('inkstone.core.code_syntax').register()
+    vim.treesitter.query.add_predicate('inkstone-details-body?', function(match, _, buf, predicate)
+        return details_body(match, buf, predicate[2]) ~= nil
+    end, { force = true })
+    vim.treesitter.query.add_directive('inkstone-details-body!', function(match, _, buf, predicate, metadata)
+        local capture = predicate[2]
+        metadata[capture] = metadata[capture] or {}
+        metadata[capture].range = details_body(match, buf, capture)
+    end, { force = true })
     for _, language in ipairs(state.file_types) do
         M.inject(language)
     end

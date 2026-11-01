@@ -97,6 +97,7 @@
 ---@field scope_highlight? string
 
 ---@class (exact) render.md.code.UserConfig: render.md.base.UserConfig
+---@field syntax? boolean
 ---@field sign? boolean
 ---@field conceal_delimiters? boolean
 ---@field language? boolean

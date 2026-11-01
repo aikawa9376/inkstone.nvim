@@ -133,6 +133,39 @@ return function(test, equal)
         lua('assert(vim.wait(1000, function() return vim.api.nvim_win_get_cursor(0)[1] == 3 end, 5))')
     end)
 
+    test('details tags become a styled control and body, including multiline summaries at the cursor', function()
+        local result = lua([=[
+            setup({ '<details open>', '', '<summary>', '<strong>Styled</strong>', 'Title', '</summary>', '',
+                '# Content', '', '```lua', 'local answer = 42', '```', '', '</details>', '', 'AFTER' },
+                { anti_conceal = { enabled = true, above = 1, below = 1 } })
+            vim.api.nvim_win_set_cursor(0, { 1, 0 })
+            refresh()
+            local result = { open = table.concat(rows(18), '\n') }
+            local context = require('inkstone.request.context').get(vim.api.nvim_get_current_buf())
+            local blocks = require('inkstone.core.folds').blocks(context.buf, vim.treesitter.get_parser(context.buf, 'markdown'), context.config.folds)
+            result.title = blocks[1].title
+            result.body = false
+            for _, mark in ipairs(require('inkstone.core.ui').cache[context.buf]:get()) do
+                if mark:get().details_body and mark:shown() then result.body = true end
+            end
+            require('inkstone.api').toggle_view()
+            refresh()
+            result.closed = table.concat(rows(18), '\n')
+            require('inkstone.api').toggle_view()
+            refresh()
+            result.reopened = table.concat(rows(18), '\n')
+            return result
+        ]=])
+        equal(result.title, 'Styled Title')
+        assert(result.body)
+        assert(result.open:find('▼ Styled Title', 1, true))
+        for _, state in ipairs({ result.open, result.closed, result.reopened }) do
+            assert(not state:find('<details', 1, true) and not state:find('<summary', 1, true) and not state:find('</summary', 1, true))
+        end
+        assert(not result.closed:find('answer', 1, true))
+        assert(result.reopened:find('answer', 1, true))
+    end)
+
     test('nested code folds have a visible summary across details close and reopen', function()
         local result = lua([=[
             setup({ 'BEFORE', '', '<details>', '', '<summary>Outer</summary>', '',

@@ -84,6 +84,15 @@ close/reopen. Ctrl+i on code toggles code; use the details title for the parent.
 A dedicated "▶ N lines · language" code summary stays visible while rendered.
 Closed details similarly show "▶ N lines · title"; N counts hidden source rows.
 Anti-conceal margins around the anchor do not reopen collapsed bodies.
+Details/summary tags become a styled header, with InkstoneDetailsHeader (Title)
+and InkstoneDetailsBody (NormalFloat). Multiline summaries are supported.
+The body renders Markdown even without blank separators; no HTML parser is
+required. Fenced HTML examples stay literal. Use the standard <details> tag.
+Code colors require the language parser; common aliases such as sh, py and js
+are recognized without replacing user registrations. Without a native
+highlighter, code.syntax=true colors visible code from its injection trees.
+Set code.syntax=false to disable this fallback. Indented code receives block
+background/padding; open fences and EOF keep their final body row decorated.
 <Plug>(InkstoneMoveDown) and <Plug>(InkstoneMoveUp) skip hidden fold rows in
 Normal mode, with counts. All attached buffers automatically map j/k, gj/gk
 and Up/Down to skip hidden fold rows, including ordinary Markdown and previews.

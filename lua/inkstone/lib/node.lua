@@ -255,7 +255,8 @@ end
 
 ---@return integer[]
 function Node:widths()
-    return require('inkstone.lib.width_cache').get(self.buf, self.start_row, self.end_row)
+    local finish = self.end_row + (self.end_col > 0 and 1 or 0)
+    return require('inkstone.lib.width_cache').get(self.buf, self.start_row, finish)
 end
 
 ---@param pattern string

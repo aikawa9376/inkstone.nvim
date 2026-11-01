@@ -45,6 +45,8 @@ M.colors = {
     Math            = '@markup.math',
     Indent          = 'Whitespace',
     HtmlComment     = '@comment',
+    DetailsHeader   = 'Title',
+    DetailsBody     = 'NormalFloat',
     -- Links
     Link            = '@markup.link.label.markdown_inline',
     LinkTitle       = '@markup.link.markdown_inline',
