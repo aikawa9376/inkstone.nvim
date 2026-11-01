@@ -56,6 +56,8 @@ function M.open(src_buf)
             require('inkstone.core.actions').toggle(dst_buf, dst_win)
         end, { buffer = dst_buf, desc = 'Toggle Markdown view' })
     end
+    vim.keymap.set('n', 'j', '<Plug>(InkstoneMoveDown)', { buffer = dst_buf, desc = 'Move down past hidden fold rows' })
+    vim.keymap.set('n', 'k', '<Plug>(InkstoneMoveUp)', { buffer = dst_buf, desc = 'Move up past hidden fold rows' })
 
     vim.api.nvim_create_autocmd({ 'CursorMoved', 'CursorMovedI' }, {
         group = M.group,

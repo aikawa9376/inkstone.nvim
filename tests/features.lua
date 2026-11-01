@@ -365,6 +365,48 @@ return function(test, equal, buffer)
         equal(folds.cache[buf], nil)
     end)
 
+    test('details summaries allow blank lines and toggling hidden code opens the parent first', function()
+        local lines = { 'BEFORE', '', '<details>', '', '<summary>Heading Configuration</summary>', '',
+            '```lua', 'print("body")', '```', '', '</details>', '', 'AFTER' }
+        local buf, parser, ctx, marks = parse(lines)
+        local blocks = folds.blocks(buf, parser, ctx.config.folds)
+        equal({ blocks[1].title, blocks[1].summary_row }, { 'Heading Configuration', 4 })
+        vim.api.nvim_win_set_cursor(0, { 8, 0 })
+        folds.toggle(buf, vim.api.nvim_get_current_win())
+        assert(vim.wait(1000, function() return not folds.closed(buf, blocks[1]) end, 5))
+        assert(not folds.closed(buf, blocks[2]), 'hidden code must not be toggled')
+        marks = folds.apply(ctx, parser, {})
+        local hidden = {}
+        for _, mark in ipairs(marks) do
+            if mark.fold_hidden then hidden[#hidden + 1] = { mark.start_row, mark.opts.end_row or mark.start_row } end
+        end
+        equal(hidden, { { 3, 4 }, { 10, 10 } })
+        vim.api.nvim_win_set_cursor(0, { 8, 0 })
+        folds.toggle(buf, vim.api.nvim_get_current_win())
+        assert(vim.wait(1000, function() return folds.closed(buf, blocks[2]) end, 5))
+        assert(not folds.closed(buf, blocks[1]), 'expanded parent must allow child toggling')
+        equal(vim.api.nvim_buf_get_lines(buf, 0, -1, false), lines)
+        vim.api.nvim_buf_delete(buf, { force = true })
+    end)
+
+    test('a collapsed code fence retains its anchor even without a language heading', function()
+        local buf, parser, ctx = parse({ 'BEFORE', '', '```', 'body', '```', '', 'AFTER' }, {
+            code = { language = false },
+        })
+        vim.api.nvim_win_set_cursor(0, { 3, 0 })
+        folds.toggle(buf, vim.api.nvim_get_current_win())
+        local block = folds.blocks(buf, parser, ctx.config.folds)[1]
+        assert(vim.wait(1000, function() return folds.closed(buf, block) end, 5))
+        local marks = require('inkstone.core.handlers').run(ctx, parser)
+        local anchor
+        for _, mark in ipairs(marks) do
+            assert(not (mark.start_row == 2 and mark.opts.conceal_lines), 'fold anchor was concealed')
+            if mark.folded then anchor = mark end
+        end
+        assert(anchor and anchor.start_row == 2)
+        vim.api.nvim_buf_delete(buf, { force = true })
+    end)
+
     test('media finds real image and diagram nodes and excludes folded contents', function()
         local buf, _, ctx = parse({ 'BEFORE', '', '![caption](assets/example%20image.png)', '',
             '```mermaid', 'graph LR', 'A-->B', '```', '', '```plantuml', '@startuml', 'A -> B', '@enduml', '```', '',

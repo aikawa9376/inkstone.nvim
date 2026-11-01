@@ -130,6 +130,7 @@ function M.attach(buf)
     end
 
     local config = state.get(buf)
+    require('inkstone.core.actions').attach(buf)
     state.on.attach({ buf = buf })
     state.attach()
 

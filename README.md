@@ -59,6 +59,10 @@ lazy.nvim の例:
 :checkhealth inkstone
 ```
 
+Normal モードの `Ctrl+i` は、カーソル位置に応じて fold を開閉し、表では「表 → リスト → グラフ → 表」を循環します。グラフにできない表は表とリストを往復します。対象がない場所では、通常のジャンプ履歴の前進として動きます。詳しくは [表示切り替え](doc/rendering-features.md) を参照してください。
+
+Snacks の Kitty 画像表示を使う場合、表内の画像はセル幅に合わせて縮小し、高さに合わせて罫線も伸ばします。GIF・動画は変換可能な静止プレビューとして扱います。[表内画像の条件](doc/rendering-features.md#images-inside-tables) も参照してください。
+
 - Lua: `require('inkstone').setup(opts)`
 - ハイライト: `InkstoneH1`、`InkstoneCode`、`InkstoneTableHead` など。
 - ベースの設定一覧: [doc/upstream-configuration.md](doc/upstream-configuration.md)

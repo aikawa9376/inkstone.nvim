@@ -60,6 +60,176 @@ return function(test, equal)
         end
     ]=], vim.fn.getcwd(), vim.env.INKSTONE_PARSER_RTP)
 
+    test('fold motions skip long hidden code and details, preserve counts and leave raw views native', function()
+        local result = lua([=[
+            local lines = { 'BEFORE', '', '<details>', '', '<summary>Heading Configuration</summary>', '', '```lua' }
+            for i = 1, 800 do lines[#lines + 1] = 'print(' .. i .. ')' end
+            vim.list_extend(lines, { '```', '', '</details>', '', 'AFTER' })
+            setup(lines)
+            require('inkstone.core.command').init()
+            vim.keymap.set('n', 'j', '<Plug>(InkstoneMoveDown)', { buffer = true })
+            vim.keymap.set('n', 'k', '<Plug>(InkstoneMoveUp)', { buffer = true })
+            local folds = require('inkstone.core.folds')
+            local result = { positions = {}, foldmethod = vim.wo.foldmethod }
+            local function move(row, keys)
+                vim.api.nvim_win_set_cursor(0, { row, 0 })
+                vim.cmd.normal({ args = { keys } })
+                result.positions[#result.positions + 1] = vim.api.nvim_win_get_cursor(0)[1]
+            end
+            move(3, 'j')
+            move(#lines - 1, 'k')
+            move(2, '2j')
+            move(#lines, '2k')
+            result.closed = rows(8)
+            vim.wo.conceallevel = 0
+            move(3, 'j') -- visible source rows must remain addressable
+            vim.wo.conceallevel = 3
+            vim.api.nvim_win_set_cursor(0, { 3, 0 })
+            folds.toggle()
+            refresh()
+            result.open = rows(10)
+            move(3, 'j') -- skip the blank line and source summary tag
+            move(#lines - 1, 'k') -- skip the closing details tag
+            vim.api.nvim_win_set_cursor(0, { 7, 0 })
+            folds.toggle()
+            refresh()
+            move(7, 'j')
+            move(809, 'k')
+            require('inkstone').disable()
+            assert(vim.wait(1000, function() return #vim.api.nvim_buf_get_extmarks(0, require('inkstone.core.ui').ns, 0, -1, {}) == 0 end, 5))
+            move(3, 'j')
+            result.source = vim.deep_equal(vim.api.nvim_buf_get_lines(0, 0, -1, false), lines)
+            result.foldmethod_unchanged = vim.wo.foldmethod == result.foldmethod
+            return result
+        ]=])
+        equal(result.positions, { 811, 3, 811, 3, 4, 6, 809, 809, 7, 4 })
+        assert(table.concat(result.closed, '\n'):find('▶ Heading Configuration', 1, true))
+        assert(table.concat(result.open, '\n'):find('print(1)', 1, true))
+        assert(not table.concat(result.open, '\n'):find('<summary>', 1, true))
+        assert(result.source and result.foldmethod_unchanged)
+    end)
+
+    test('fold motions preserve preferred columns, native folds and EOF anchors', function()
+        local result = lua([=[
+            setup({ 'abcdefghij', '<details>', '<summary>Title</summary>', '', 'body', '', '</details>', 'abcdefghij' })
+            local folds = require('inkstone.core.folds')
+            vim.wo.foldmethod, vim.wo.foldlevel = 'manual', 0
+            vim.cmd('4,6fold')
+            vim.api.nvim_win_set_cursor(0, { 1, 7 })
+            vim.cmd('normal! j')
+            folds.move(1)
+            local result = { vim.api.nvim_win_get_cursor(0), vim.fn.foldclosed(4) }
+            folds.move(-1)
+            folds.move(-1)
+            result[3] = vim.api.nvim_win_get_cursor(0)
+            setup({ 'BEFORE', '```', 'body', '```' }, { code = { language = false } })
+            vim.api.nvim_win_set_cursor(0, { 2, 0 })
+            folds.toggle()
+            refresh()
+            folds.move(1, 3)
+            result[4] = vim.api.nvim_win_get_cursor(0)
+            result[5] = rows(3)
+            return result
+        ]=])
+        equal(result[1], { 8, 7 })
+        equal(result[2], 4)
+        equal(result[3], { 1, 7 })
+        equal(result[4], { 2, 0 })
+        assert(table.concat(result[5], '\n'):find('▶ 2 lines', 1, true))
+    end)
+
+    test('side preview maps fold movement without changing source keybindings', function()
+        local result = lua([=[
+            setup({ 'BEFORE', '<details>', '<summary>Title</summary>', '', 'body', '', '</details>', 'AFTER' })
+            local src = vim.api.nvim_get_current_buf()
+            local source_keys = vim.api.nvim_buf_get_keymap(src, 'n')
+            local preview = require('inkstone.core.preview')
+            preview.open(src)
+            local dst = preview.buffers[src]
+            assert(dst and not vim.bo[dst].modifiable)
+            vim.api.nvim_set_current_win(vim.fn.win_findbuf(dst)[1])
+            refresh()
+            vim.api.nvim_win_set_cursor(0, { 2, 0 })
+            vim.cmd.normal({ args = { 'j' } })
+            local result = { vim.api.nvim_win_get_cursor(0)[1] }
+            vim.cmd.normal({ args = { 'k' } })
+            result[2] = vim.api.nvim_win_get_cursor(0)[1]
+            result[3] = vim.deep_equal(source_keys, vim.api.nvim_buf_get_keymap(src, 'n'))
+            preview.open(src)
+            return result
+        ]=])
+        equal(result, { 8, 2, true })
+    end)
+
+    test('Ctrl+i cycles eligible table views and toggles folds using actual input', function()
+        lua([=[
+            setup({ 'BEFORE', '', '| Name | Value |', '| --- | --- |', '| A | 1 |', '',
+                '```lua', 'print("body")', '```', '', '> [!NOTE]- Note', '> body', '',
+                '<details>', '<summary>Title</summary>', '', 'body', '', '</details>', '', 'AFTER' })
+            vim.api.nvim_win_set_cursor(0, { 5, 0 })
+        ]=])
+        for _, mode in ipairs({ 'list', 'chart', 'table' }) do
+            rpc('nvim_input', '<C-i>')
+            lua([=[
+                local mode = ...
+                assert(vim.wait(1000, function()
+                    local entries = require('inkstone.core.table_views').cache[vim.api.nvim_get_current_buf()]
+                    return entries and entries[1].mode == mode
+                end, 5), 'Ctrl+i table cycle did not reach ' .. mode)
+            ]=], mode)
+        end
+        for _, spec in ipairs({ { 7, true }, { 7, false }, { 11, false }, { 11, true }, { 14, false }, { 14, true } }) do
+            lua('vim.api.nvim_win_set_cursor(0, { ..., 0 })', spec[1])
+            rpc('nvim_input', '<C-i>')
+            lua([=[
+                local row, closed = ...
+                local folds, buf = require('inkstone.core.folds'), vim.api.nvim_get_current_buf()
+                local parser = vim.treesitter.get_parser(buf, 'markdown')
+                assert(vim.wait(1000, function()
+                    for _, block in ipairs(folds.blocks(buf, parser, require('inkstone.state').get(buf).folds)) do
+                        if block.start_row == row - 1 then return folds.closed(buf, block) == closed end
+                    end
+                end, 5), 'Ctrl+i did not toggle the fold')
+            ]=], spec[1], spec[2])
+        end
+        lua([=[
+            setup({ '| Name | Value |', '| --- | --- |', '| A | word |' })
+            vim.api.nvim_win_set_cursor(0, { 1, 0 })
+        ]=])
+        for _, mode in ipairs({ 'list', 'table', 'list' }) do
+            rpc('nvim_input', '<C-i>')
+            lua([=[
+                local mode = ...
+                assert(vim.wait(1000, function()
+                    local entries = require('inkstone.core.table_views').cache[vim.api.nvim_get_current_buf()]
+                    return entries and entries[1].mode == mode
+                end, 5))
+            ]=], mode)
+        end
+    end)
+
+    test('Ctrl+i keeps native jump-forward movement outside contextual targets and when disabled', function()
+        for _, disabled in ipairs({ false, true }) do
+            for _, count in ipairs({ 1, 2 }) do
+                lua([=[
+                    setup({ 'first', '', 'middle', '', 'last' })
+                    if ... then require('inkstone').disable() end
+                    vim.cmd('clearjumps')
+                    vim.cmd('normal! gg3GG')
+                    local key = vim.api.nvim_replace_termcodes('<C-o>', true, false, true)
+                    vim.cmd.normal({ args = { '2' .. key }, bang = true })
+                    assert(vim.api.nvim_win_get_cursor(0)[1] == 1)
+                ]=], disabled)
+                rpc('nvim_input', tostring(count) .. '<C-i>')
+                lua([=[
+                    local target = ...
+                    assert(vim.wait(1000, function() return vim.api.nvim_win_get_cursor(0)[1] == target end, 5),
+                        'Ctrl+i did not retain native counted jump-forward movement')
+                ]=], count == 1 and 3 or 5)
+            end
+        end
+    end)
+
     test('native BudouX rows support screen motions, character selection, yank and mouse', function()
         local result = lua([=[
             local source = '今日は天気がいいから散歩しましょう。'

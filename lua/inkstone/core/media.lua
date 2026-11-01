@@ -34,9 +34,14 @@ function M.collect(context, parser, marks)
     if not config.enabled then return end
     local seen = {}
     local function add(item)
+        if item.kind == 'image' and not item.cell then
+            for _, range in ipairs(context.table_image_ranges or {}) do
+                if item.row >= range[1] and item.row <= range[2] then return end
+            end
+        end
         for _, mark in ipairs(marks) do
             if mark.folded and item.row == mark.start_row then return end
-            if mark.opts.conceal_lines then
+            if mark.opts.conceal_lines and not (item.cell and vim.deep_equal(item.table_range, mark.table_range)) then
                 local finish = mark.opts.end_row or mark.start_row
                 finish = finish + 1
                 if item.row >= mark.start_row and item.row < finish then return end
@@ -48,6 +53,7 @@ function M.collect(context, parser, marks)
         item.key = key .. ':' .. vim.fn.sha256(item.source)
         context.media[#context.media + 1] = item
     end
+    for _, item in ipairs(context.table_media or {}) do add(item) end
     for _, item in ipairs(context.charts or {}) do add(item) end
     context.view:each_tree(parser, function(tree, language)
         local lang = language:lang()
@@ -161,29 +167,40 @@ function M.update(context, hidden, editing)
     M.cache[buf] = entries
     local tick = vim.api.nvim_buf_get_changedtick(buf)
     for key, entry in pairs(entries) do
-        if not requested[key] or entry.tick ~= tick then close(entry); entries[key] = nil end
+        if not requested[key] or entry.tick ~= tick or not vim.deep_equal(entry.cell, requested[key].cell) then
+            close(entry); entries[key] = nil
+        end
     end
-    if next(requested) == nil then return end
+    if next(requested) == nil and #(context.table_image_ranges or {}) == 0 then return end
     local image = M.backend()
     if not image then return end
+    require('inkstone.core.table_media').suppress(context, image)
     for key, item in pairs(requested) do
         -- Snacks' own document renderer already handles images and Mermaid.
         -- Do not allocate a second placement when it owns this buffer.
-        local native = vim.b[buf].snacks_image_attached and (item.kind == 'image' or item.kind == 'mermaid')
+        local native = not item.cell and vim.b[buf].snacks_image_attached and (item.kind == 'image' or item.kind == 'mermaid')
             and image.config and image.config.enabled and image.config.doc.enabled
         if not native and not entries[key] then
             local entry = vim.deepcopy(item)
             entry.tick = tick
             entries[key] = entry
+            local function valid()
+                return M.cache[buf] == entries and entries[key] == entry and vim.api.nvim_buf_is_valid(buf)
+                    and vim.api.nvim_buf_get_changedtick(buf) == tick
+            end
             M.convert(entry, config, function(path, err)
-                if M.cache[buf] ~= entries or entries[key] ~= entry or not vim.api.nvim_buf_is_valid(buf)
-                    or vim.api.nvim_buf_get_changedtick(buf) ~= tick then return end
+                if not valid() then return end
                 entry.path, entry.error = path, err
                 if not path then return end
                 local ok, placement = pcall(image.placement.new, buf, path, {
                     pos = { item.row + 1, item.col or 0 }, inline = true, conceal = false,
-                    max_width = math.min(config.max_width, require('inkstone.lib.env').win.width(context.win)),
-                    max_height = item.height or config.max_height, auto_resize = true,
+                    max_width = item.cell and item.cell.width or math.min(config.max_width, context:window_width()),
+                    max_height = item.cell and item.cell.height or item.height or config.max_height, auto_resize = true,
+                    on_update_pre = item.cell and function(p)
+                        if entry.adapted then return end
+                        entry.adapted = true
+                        require('inkstone.core.table_media').attach(context, entry, p, valid)
+                    end or nil,
                 })
                 if ok then entry.placement = placement else entry.error = tostring(placement) end
             end)

@@ -146,9 +146,11 @@ with a timeout. Output is reused from
 Changing source invalidates the pending placement; disabling rendering or
 wiping the buffer closes Inkstone placements and cancels its pending jobs.
 
-Snacks' own document renderer retains ownership of images and Mermaid in
-buffers it has already attached to; Inkstone avoids creating duplicate
+Snacks' own document renderer retains ownership of ordinary images and Mermaid
+in buffers it has already attached to; Inkstone avoids creating duplicate
 placements. Its native image configuration then controls those placements.
+Images inside supported tables are an exception: Inkstone owns their cell
+layout and uses Snacks for image conversion and graphics transport.
 Use Snacks' `image.doc.enabled = false` if Inkstone should own document media
 placements, while leaving the Snacks image backend available. PlantUML is
 handled by Inkstone.
@@ -165,6 +167,30 @@ close, source wipe, disable and setup. HTTP(S) resources use Snacks' downloader.
 Missing backends/converters leave the Markdown readable; the manual command
 and health checks explain missing dependencies.
 This integration does not implement animated video playback.
+
+### Images inside tables
+
+With `pipe_table.wrap = true`, `cell = 'trimmed'` or `'padded'`, and a Snacks
+backend supporting Kitty Unicode image placeholders, images render inside
+their cells. Image columns request up to `media.max_width` columns and share
+the available window width. Each image fits its cell's content width and
+`media.max_height`; the row grows to the tallest cell, with continuous vertical
+borders. Captions remain above the previews. Source text is unchanged.
+
+This also applies to static GIF/video previews that the installed backend can
+convert. It does not add playback or install video converters. Missing images
+and unavailable converters leave readable captions/links.
+
+Window resizing recomputes the cell bounds. Anti-conceal restores the source
+table and removes its image placements while editing; leaving restores the
+previews. Switching to list/chart removes cell images. Snacks' native document
+discovery excludes these managed tables, and existing native table placements
+are retired, so enabling Snacks document images does not duplicate them.
+Images outside the table keep their existing renderer.
+
+Cell image layout currently requires one window displaying the buffer and
+`conceallevel >= 2`. Other table styles, shared views and backends without
+Unicode placeholders retain their existing image behavior.
 
 ## Table / list / chart
 
@@ -197,9 +223,21 @@ vim.keymap.set('n', '<leader>mg', '<Plug>(InkstoneToggleChart)')
 ```
 
 The unified `:Inkstone toggle_view` / `<Plug>(InkstoneToggleView)` action cycles
-table views, toggles the containing fold or opens media, in that order. The
-side preview maps Enter and `za` to that action. Ordinary source buffers keep
-their existing keybindings. `<Plug>(InkstoneToggleTable)` is the table-only cycle.
+table views, toggles the containing fold or opens media at the cursor. Closed
+ancestor folds open before their hidden children can be selected. Inside an
+expanded fold, a table takes priority over the enclosing fold. Numeric tables
+cycle table → list → chart → table; other tables cycle table → list → table.
+Literal tables in code examples are excluded unless `nested = true`.
+
+Attached buffers have a Normal-mode, buffer-local `Ctrl+i` mapping for this
+contextual action, including the side preview. Where there is no target, or
+Inkstone is disabled, `Ctrl+i` retains native jump-forward movement and counts.
+Only media on the cursor row is opened; an earlier image is not selected by
+this action. The separate `:Inkstone media` command can still open earlier media.
+The side preview also maps Enter and `za` to the contextual action.
+`<Plug>(InkstoneToggleTable)` is the table-only cycle. Override the buffer-local
+`Ctrl+i` mapping in `on.attach` if another binding is preferred. Terminals that
+encode Ctrl+i as Tab also trigger this mapping with Tab.
 
 List view follows LazyAgent's column-name/value cards, preserving rendered
 inline chunks and Japanese wrapping. Chart view treats numeric columns as
@@ -344,9 +382,11 @@ in this demo. `:checkhealth inkstone` reports typography and converter availabil
 
 ## Folding
 
-`:Inkstone toggle_fold` toggles the innermost code fence, callout or `<details>`
-block containing the cursor. It changes display state without taking over
-Neovim's `foldmethod`, editing source or replacing existing keybindings.
+`:Inkstone toggle_fold` toggles the innermost visible code fence, callout or
+`<details>` block containing the cursor. A cursor inside a collapsed parent
+opens that parent before its hidden children can be toggled. It changes display
+state without taking over Neovim's `foldmethod`, editing source or replacing
+existing keybindings.
 
 ```lua
 require('inkstone').setup({
@@ -359,8 +399,29 @@ The side preview has buffer-local `za` and `<CR>` view actions. Code blocks star
 expanded. Obsidian callouts beginning with `> [!NOTE]-` start collapsed;
 `> [!NOTE]+` starts expanded. `<details>` starts collapsed unless it has an
 `open` attribute. A `<summary>` on the opening line or following line supplies
-its title. Nested details are supported. Toggle state follows inserted lines
-using buffer-local extmark anchors and is released on buffer wipe/setup.
+its title; blank lines before the summary are allowed. Nested details are
+supported. Toggle state follows inserted lines using buffer-local extmark
+anchors and is released on buffer wipe/setup.
+
+Line concealment leaves source rows addressable by native `j/k` and `gj/gk`.
+For long folds, map the Normal-mode actions below in Markdown buffers. They
+skip currently hidden fold bodies, summary tags and closing details tags,
+and support counts such as `2j`. They retain native movement when the source
+view is active. Operators and Visual-mode motions keep their existing behavior.
+The side preview installs these `j/k` mappings automatically.
+
+```lua
+vim.api.nvim_create_autocmd('FileType', {
+    pattern = 'markdown',
+    callback = function(event)
+        vim.keymap.set('n', 'j', '<Plug>(InkstoneMoveDown)', { buffer = event.buf })
+        vim.keymap.set('n', 'k', '<Plug>(InkstoneMoveUp)', { buffer = event.buf })
+    end,
+})
+```
+
+The equivalent Lua functions are `require('inkstone').move_down()` and
+`require('inkstone').move_up()`.
 
 ## ACP tables
 

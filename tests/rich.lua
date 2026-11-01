@@ -246,6 +246,46 @@ return function(test, equal, buffer)
         vim.api.nvim_buf_delete(buf, { force = true })
     end)
 
+    test('unified view opens collapsed parents before hidden tables and ignores literal code tables', function()
+        local folds, actions = require('inkstone.core.folds'), require('inkstone.core.actions')
+        local buf, _, parser = setup({ 'BEFORE', '', '<details>', '<summary>Outer</summary>', '',
+            '| Name | Value |', '| - | - |', '| A | 1 |', '', '</details>', '', 'AFTER' })
+        parser:parse(true)
+        local block = folds.blocks(buf, parser, state.get(buf).folds)[1]
+        vim.api.nvim_win_set_cursor(0, { 8, 0 })
+        actions.toggle()
+        assert(vim.wait(1000, function() return not folds.closed(buf, block) end, 5))
+        equal(views.cache[buf], nil)
+        vim.api.nvim_buf_delete(buf, { force = true })
+
+        buf = setup({ '```markdown', '| Name | Value |', '| - | - |', '| A | 1 |', '```' }, { folds = { code = false } })
+        vim.api.nvim_win_set_cursor(0, { 4, 0 })
+        local unmatched = false
+        actions.toggle(nil, nil, function() unmatched = true end)
+        assert(vim.wait(1000, function() return unmatched end, 5))
+        equal(views.cache[buf], nil)
+        equal(folds.cache[buf], nil)
+        vim.api.nvim_buf_delete(buf, { force = true })
+    end)
+
+    test('unified view only opens media at the cursor and otherwise uses its fallback', function()
+        local media, actions = require('inkstone.core.media'), require('inkstone.core.actions')
+        local buf = setup({ 'BEFORE', '', '![image](example.png)', '', 'AFTER' }, { media = { enabled = true } })
+        local open = media.open
+        local opened, unmatched = 0, 0
+        media.open = function() opened = opened + 1 end
+        vim.api.nvim_win_set_cursor(0, { 5, 0 })
+        actions.toggle(nil, nil, function() unmatched = unmatched + 1 end)
+        assert(vim.wait(1000, function() return unmatched == 1 end, 5))
+        equal(opened, 0)
+        vim.api.nvim_win_set_cursor(0, { 3, 0 })
+        actions.toggle(nil, nil, function() unmatched = unmatched + 1 end)
+        assert(vim.wait(1000, function() return opened == 1 end, 5))
+        equal(unmatched, 1)
+        media.open = open
+        vim.api.nvim_buf_delete(buf, { force = true })
+    end)
+
     external_test('viewer fits, zooms and pans real images and cleans temporary output', { 'magick' }, function()
         local media, viewer = require('inkstone.core.media'), require('inkstone.core.viewer')
         local backend = media.backend

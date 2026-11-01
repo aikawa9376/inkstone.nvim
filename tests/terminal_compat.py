@@ -62,8 +62,11 @@ class TerminalTests(unittest.TestCase):
 
     def lua(self, body):
         expression = 'execute(' + json.dumps('lua ' + body, ensure_ascii=False) + ')'
-        return subprocess.check_output(['nvim', '--server', self.nvim_socket, '--remote-expr', expression],
-                                       env=self.env, stderr=subprocess.PIPE).decode().strip()
+        try:
+            return subprocess.check_output(['nvim', '--server', self.nvim_socket, '--remote-expr', expression],
+                                           env=self.env, stderr=subprocess.PIPE).decode().strip()
+        except subprocess.CalledProcessError as error:
+            raise RuntimeError(error.stderr.decode()) from error
 
     def pump(self, duration=0.15):
         deadline = time.monotonic() + duration
@@ -1262,6 +1265,79 @@ class TerminalTests(unittest.TestCase):
         self.pump()
         self.assertIn('\\lim', self.visible_text())
         self.assertNotIn('n→∞', self.visible_text())
+        self.assert_source()
+
+    def test_table_images_share_cell_rows_and_replace_native_document_placements(self):
+        snacks = Path(os.environ.get('INKSTONE_SNACKS_RTP', Path.home() / '.local/share/nvim/lazy/snacks.nvim'))
+        if not (snacks / 'lua/snacks/init.lua').is_file():
+            self.skipTest('snacks.nvim is not installed')
+        self.tmux('set-option', '-g', 'allow-passthrough', 'on')
+        for name, size, color in [('wide.png', '1600x900', 'red'), ('tall.gif', '800x1600', 'blue')]:
+            subprocess.run(['magick', '-size', size, 'xc:' + color, str(self.root / name)], check=True)
+        self.render(['BEFORE', '', '| Screenshot | Video |', '| --- | --- |',
+                     '| ![Wide](wide.png) | ![Tall](tall.gif) |', '', 'AFTER', '', '![Outside](wide.png)'],
+                    wrap=True, conceallevel=3)
+        self.lua('vim.opt.rtp:prepend(' + json.dumps(str(snacks)) + '); '
+                 'vim.b.inkstone_root=' + json.dumps(str(self.root)) + '; '
+                 'vim.api.nvim_buf_set_name(0,' + json.dumps(str(self.root / 'document.md')) + '); '
+                 'vim.env.KITTY_WINDOW_ID="1"; vim.env.SNACKS_KITTY="true"; '
+                 'require("snacks").setup({image={enabled=true,doc={enabled=true,max_width=80,max_height=40},'
+                 'math={enabled=false},cache=' + json.dumps(str(self.root / 'snacks-cache')) + '}}); '
+                 'local c=require("inkstone.state").get(vim.api.nvim_get_current_buf()); c.media.enabled=false; '
+                 'require("snacks.image").doc.attach(vim.api.nvim_get_current_buf()); vim.wait(1200); vim.cmd("redraw!")')
+        self.pump(.5)
+        self.lua('local image=require("snacks.image"); local native=false; '
+                 'for _,m in ipairs(vim.api.nvim_buf_get_extmarks(0,image.placement.ns,0,-1,{details=true})) do '
+                 'if m[2]==4 and m[4].virt_lines then native=true end end; assert(native,"native table image was not rendered"); '
+                 'local c=require("inkstone.state").get(vim.api.nvim_get_current_buf()); '
+                 'c.media.enabled=true; c.media.max_width=50; c.media.max_height=6; '
+                 'require("inkstone.api").render({buf=vim.api.nvim_get_current_buf()}); '
+                 'assert(vim.wait(3000,function() local n=0; for _,e in pairs(require("inkstone.core.media").cache[vim.api.nvim_get_current_buf()] or {}) do '
+                 'if e.cell and e.grid and #e.grid>0 then n=n+1 end end; return n==2 end,10), "table grids not ready"); '
+                 'vim.wait(300); vim.cmd("redraw!")')
+        self.pump(.5)
+        self.assertGreater(self.screen.grman.image_count, 0)
+        text = self.visible_text()
+        self.assertIn('AFTER', text, text)
+        image_rows = [str(self.screen.line(row)) for row in range(24)
+                      if '\U0010eeee' in str(self.screen.line(row)) and '│' in str(self.screen.line(row))]
+        self.assertGreaterEqual(len(image_rows), 1, text)
+        for row in image_rows:
+            self.assertEqual(row.count('│'), 3, row)
+            self.assertTrue(row.rstrip().endswith('│'), row)
+        self.lua('local ns=require("snacks.image").placement.ns; '
+                 'for _,m in ipairs(vim.api.nvim_buf_get_extmarks(0,ns,{4,0},{4,-1},{details=true})) do '
+                 'assert(not m[4].virt_lines,"old native table grid survived takeover") end')
+        self.lua('_G.table_image_ids={}; for k,e in pairs(require("inkstone.core.media").cache[vim.api.nvim_get_current_buf()]) do '
+                 'if e.cell then _G.table_image_ids[k]=e.placement.id end end')
+        fcntl.ioctl(self.fd, termios.TIOCSWINSZ, struct.pack('HHHH', 24, 72, 0, 0))
+        self.screen.resize(24, 72)
+        os.kill(self.pid, signal.SIGWINCH)
+        self.pump(.3)
+        self.lua('require("inkstone.api").render({buf=vim.api.nvim_get_current_buf()}); '
+                 'assert(vim.wait(3000,function() local n=0; for k,e in pairs(require("inkstone.core.media").cache[vim.api.nvim_get_current_buf()] or {}) do '
+                 'if e.cell and e.cell.width<35 and e.grid and e.placement.id~=_G.table_image_ids[k] then n=n+1 end end; return n==2 end,10)); '
+                 'vim.wait(200); vim.cmd("redraw!")')
+        self.pump(.2)
+        for row in range(24):
+            line = str(self.screen.line(row))
+            if '\U0010eeee' in line and '│' in line:
+                self.assertEqual(line.count('│'), 3, line)
+        self.lua('local c=require("inkstone.state").get(vim.api.nvim_get_current_buf()); c.anti_conceal.enabled=true; c.win_options.concealcursor.rendered=""; '
+                 'vim.api.nvim_win_set_cursor(0,{5,0}); require("inkstone.api").render({buf=vim.api.nvim_get_current_buf()}); '
+                 'vim.wait(200); vim.cmd("redraw!"); assert(next(require("inkstone.core.media").cache[vim.api.nvim_get_current_buf()] or {})==nil)')
+        self.pump(.2)
+        self.assertIn('![Wide](wide.png)', self.visible_text())
+        self.lua('local c=require("inkstone.state").get(vim.api.nvim_get_current_buf()); c.anti_conceal.enabled=false; c.win_options.concealcursor.rendered="nvic"; '
+                 'vim.api.nvim_win_set_cursor(0,{1,0}); require("inkstone.api").render({buf=vim.api.nvim_get_current_buf()}); vim.wait(400)')
+        self.lua('local c=require("inkstone.request.context").get(vim.api.nvim_get_current_buf()); '
+                 'assert(#c.table_media==2); for _,e in pairs(require("inkstone.core.media").cache[c.buf]) do '
+                 'if e.cell then assert(e.placement:state().loc.width<=e.cell.width); assert(#e.grid<=6) end end; '
+                 'require("snacks.image").doc.find(c.buf,function(items) assert(#items==1 and items[1].pos[1]==9, "native table image duplicated") end); '
+                 'vim.api.nvim_win_set_cursor(0,{3,0}); require("inkstone.api").toggle_table(); vim.wait(400); vim.cmd("redraw!")')
+        self.pump(.3)
+        self.assertIn('Table · list', self.visible_text())
+        self.lua('assert(next(require("inkstone.core.media").cache[vim.api.nvim_get_current_buf()] or {})==nil)')
         self.assert_source()
 
     def test_kitty_graphics_chart_and_viewer(self):

@@ -30,6 +30,7 @@ local str = require('inkstone.lib.str')
 ---@field width integer
 ---@field space render.md.table.cell.Space
 ---@field units? render.md.table.Unit[]
+---@field images? table[]
 
 ---@class render.md.table.cell.Space
 ---@field left integer
@@ -177,10 +178,12 @@ function Parser:parse(root, marks)
                     text = node.text:sub(left + 1, #node.text - right),
                 })
                 cell.units = Parser.units(line)
+                cell.images = require('inkstone.core.table_media').cell(self.context, node)
 
                 local width, smallest = Parser.measure(cell.units)
                 desired[i] = math.max(desired[i], 2 * padding + width)
                 minimum[i] = math.max(minimum[i], 2 * padding + smallest)
+                if cell.images then desired[i] = math.max(desired[i], 2 * padding + self.context.config.media.max_width) end
             end
         end
 
@@ -195,6 +198,12 @@ function Parser:parse(root, marks)
                 cols[i].width = width
             end
         end
+    end
+
+    if self.context.table_image_ranges then
+        require('inkstone.core.table_media').register(self.context, {
+            root.start_row, root.end_row - (root.end_col == 0 and 1 or 0),
+        })
     end
 
     ---@type render.md.table.Data

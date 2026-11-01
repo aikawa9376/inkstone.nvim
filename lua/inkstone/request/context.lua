@@ -16,6 +16,9 @@ local str = require('inkstone.lib.str')
 ---@field typography table[]
 ---@field table_views? render.md.Range[]
 ---@field charts? table[]
+---@field cell_images? table<integer, table[]>
+---@field table_media? table[]
+---@field table_image_ranges? render.md.Range[]
 local Context = {}
 Context.__index = Context
 

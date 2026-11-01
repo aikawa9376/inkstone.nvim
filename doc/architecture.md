@@ -168,8 +168,25 @@ window-only matches are not captured.
 `core/folds.lua` discovers code fences, callouts and paired details blocks in
 Markdown trees. It filters hidden child decorations and emits conceal/summary
 marks; explicit toggle state follows source edits via a separate extmark
-namespace. It does not set the user's foldmethod. `core/media.lua` collects
-visible image/diagram requests after folding, uses async local conversion and
+namespace. Details summaries may follow blank lines; their source rows and the
+closing details tag are hidden while expanded. Toggle selection stops at a
+collapsed ancestor, so source motions into its hidden code cannot toggle that
+child. Closed code folds retain a visible delimiter/summary anchor even without
+a language label.
+
+`folds.move` backs the opt-in Normal-mode `InkstoneMoveDown` / `InkstoneMoveUp`
+Plug mappings. It reads only displayed `fold_hidden` marks from the decorator,
+skips those inclusive ranges, and counts visible source rows. Mode/anti-conceal
+restoration therefore makes the motions native without reparsing trees. Jumps
+retain the preferred column, respect native folds and stop at the anchor when
+a collapsed block reaches EOF. Source buffers retain their existing `j/k` mappings;
+the side preview maps `j/k` locally. It does not set the user's foldmethod.
+`tests/features.lua` covers summary extraction, parent selection and code
+anchors; `tests/softwrap.lua` exercises actual grid output and mapped motions
+through an 800-line details/code block, counts, raw fallback and native folds.
+
+`core/media.lua` collects visible image/diagram requests after folding,
+uses async local conversion and
 delegates graphics to Snacks. Pending placements reject edited/wiped buffers;
 disable/setup/wipe close placements and cancel jobs. Native Snacks document
 placements are not duplicated. See `doc/rendering-features.md` for configuration,
@@ -189,7 +206,17 @@ deletion drops the mode instead of transferring it to a new table at that row.
 text bars. Series must share units; missing values are gaps. The media pipeline
 rasterizes SVG with a local command and caches it by content/options. Charts
 are Inkstone-owned even when Snacks owns ordinary image/Mermaid placements.
-`core/actions.lua` dispatches a shared view action to table modes, folds or media.
+`core/actions.lua` dispatches a shared view action to collapsed ancestors first,
+then tables, open folds and media on the cursor row. Table queries share the
+code-example boundary predicate. `manager.attach` installs its buffer-local
+Normal-mode Ctrl+i action before `on.attach`, allowing user overrides. Unmatched
+or disabled-buffer keypresses retain native counted jump-forward movement;
+explicit `toggle_view` calls simply do nothing without a target. Async dispatch
+rejects source/cursor/window changes before selecting a target. Numeric tables
+retain the existing table/list/chart cycle; nonnumeric tables skip charts.
+`tests/rich.lua` covers dispatch/hidden-child boundaries and media selection;
+`tests/softwrap.lua` sends actual Ctrl+i input through table cycles, code,
+callout/details toggles and native jump fallback.
 
 `core/viewer.lua` owns floating image/PDF viewport state, zoom, pan, page and
 request generation. ImageMagick produces a bounded PNG crop asynchronously;
@@ -202,6 +229,35 @@ Ordinary PDF links are manual-view items, not duplicate inline images.
 without replacing the active render context. Manual media actions and chart
 validation must use it so pending parse callbacks and typography/table edit
 metadata remain attached to the actual render request.
+
+`core/table_media.lua` coordinates table image cells before block rendering.
+It collects visible image candidates from the request's eligible inline trees.
+For one-window, padded/trimmed wrapped tables with conceallevel >= 2 and a
+Snacks placeholder backend, the table parser includes image width preferences
+in ordinary column allocation. `render/markdown/table.lua:wrapped_row` appends
+each loaded grid below its cell caption and aligns every row through the same
+column budgets, including vertical borders and shorter neighboring cells.
+
+`core/media.lua` owns loading and placement lifetime. Cell requests include
+their width/height budgets; changed source or geometry closes the old placement.
+The adapter overrides only each managed placement's `state`/`render_grid`
+methods. It calls the backend's existing grid builder on a proxy, capturing
+its image-ID highlights and Unicode placeholder chunks instead of letting it
+emit separate virtual lines. Backend transfer and fitting remain native.
+Grid readiness schedules a guarded render; stale completions cannot publish.
+Table source restoration, view changes, disable and wipe remove placements.
+
+The optional Snacks integration wraps `image.doc.find` once and filters only
+managed table ranges in active Inkstone contexts. It leaves unrelated buffers,
+ordinary images and global Snacks options intact. Public placement cleanup
+retires previously rendered native table grids identified in the Snacks
+namespace. This adapter depends on the installed backend's `state`,
+`render_grid`, `_render` grid shape and `SnacksImage<placement-id>` highlights;
+it is an integration boundary to revalidate when updating Snacks. Unsupported
+backends/shared buffers use their existing image behavior. The terminal test
+`test_table_images_share_cell_rows_and_replace_native_document_placements`
+uses real native preexisting images, PNG/GIF grids, resize, anti-conceal,
+list transitions and source preservation with stock tmux/Kitty.
 
 ## Kitty typography
 

@@ -71,6 +71,19 @@ Use :checkhealth inkstone and :checkhealth snacks to inspect dependencies.
 The side preview maps za and <CR> to toggle_view. Callout [!NOTE]- and details without open start
 collapsed; code blocks start expanded. Source bytes and foldmethod are unchanged.
 Set folds.enabled=false or media.enabled=false to disable these features.
+Images inside padded/trimmed wrapped tables fit their cell width and
+media.max_height. Captions and vertical borders share the image rows. This
+requires a Snacks Unicode-placeholder backend and one window for the buffer.
+Resizing refits the cells; source restoration and list/chart views remove the
+cell images. Native Snacks document images outside these tables stay native.
+GIF/video previews depend on installed converters; playback is not provided.
+Blank lines between details and summary tags are supported. Toggling from a
+hidden child opens its collapsed parent first.
+<Plug>(InkstoneMoveDown) and <Plug>(InkstoneMoveUp) skip hidden fold rows in
+Normal mode, with counts. Map them to buffer-local j/k in Markdown buffers;
+the side preview provides these mappings automatically. Native j/k and gj/gk
+can enter concealed source rows. Operators and Visual mode stay native.
+:Inkstone move_down / move_up and the corresponding Lua functions are also available.
 
 TABLE VIEWS
 :Inkstone toggle_table cycles table -> list -> chart -> table under the cursor.
@@ -79,6 +92,13 @@ table/chart. Nonnumeric tables skip charts. Numeric series must share units.
 Charts use rsvg-convert and Snacks, with text bars when those are unavailable.
 pipe_table.view chooses the default; pipe_table.chart.kind is bar or line.
 :Inkstone toggle_view chooses the table, fold or media at the cursor.
+Normal-mode Ctrl+i invokes this action in attached buffers. Tables cycle
+table -> list -> chart -> table (nonnumeric tables skip chart). Closed parent
+folds open before hidden children are selected. Otherwise tables take priority
+over enclosing folds, and media must be on the cursor row. Without a target,
+or with Inkstone disabled, Ctrl+i retains native jump-forward movement/counts.
+Terminals that encode Ctrl+i as Tab also use Tab for this mapping. Buffer-local
+overrides can be set in on.attach.
 <Plug>(InkstoneToggleView), <Plug>(InkstoneToggleTable),
 <Plug>(InkstoneToggleList) and <Plug>(InkstoneToggleChart) are mappable actions.
 Table view state follows edits; source data is never rewritten.

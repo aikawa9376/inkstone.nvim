@@ -65,12 +65,23 @@ function M.blocks(buf, parser, config, view)
             elseif #stack > 0 then
                 local opening = table.remove(stack)
                 local inline_summary = opening.line:match('>[ \t]*(<[sS][uU][mM][mM][aA][rR][yY].*)')
-                local summary = inline_summary or vim.api.nvim_buf_get_lines(buf, opening.row + 1, opening.row + 2, false)[1] or ''
+                local summary_row = opening.row + 1
+                local summary = inline_summary
+                if not summary then
+                    -- Markdown commonly separates the HTML tags with blank lines.
+                    while summary_row < tag.row do
+                        summary = vim.api.nvim_buf_get_lines(buf, summary_row, summary_row + 1, false)[1] or ''
+                        if not summary:match('^%s*$') then break end
+                        summary_row = summary_row + 1
+                    end
+                end
+                summary = summary or ''
                 local title = summary:match('^%s*<[sS][uU][mM][mM][aA][rR][yY][^>]*>(.-)</[sS][uU][mM][mM][aA][rR][yY]>%s*$')
                 blocks[#blocks + 1] = {
                     kind = 'details', start_row = opening.row, end_row = tag.row + 1,
                     closed = not opening.line:lower():match('%sopen[%s=>]'),
-                    title = title and title:gsub('<[^>]+>', '') or 'Details', summary = title ~= nil and not inline_summary,
+                    title = title and title:gsub('<[^>]+>', '') or 'Details',
+                    summary_row = title and not inline_summary and summary_row or nil,
                 }
             end
         end
@@ -101,8 +112,10 @@ function M.apply(context, parser, marks)
     if not config.enabled then return marks end
     local blocks = M.blocks(context.buf, parser, config, context.view)
     local hidden, extra = {}, {}
+    local anchors = {}
     local function add(row, opts)
-        extra[#extra + 1] = { conceal = true, modes = config.render_modes, start_row = row, start_col = 0, opts = opts }
+        extra[#extra + 1] = { conceal = true, modes = config.render_modes, start_row = row, start_col = 0,
+            fold_hidden = opts.conceal_lines ~= nil, opts = opts }
     end
     for _, block in ipairs(blocks) do
         local inside = false
@@ -112,6 +125,7 @@ function M.apply(context, parser, marks)
         if not inside then
             local closed = M.closed(context.buf, block)
             if closed then
+                anchors[block.start_row] = true
                 hidden[#hidden + 1] = { block.start_row + 1, block.end_row }
                 add(block.start_row + 1, { end_row = block.end_row - 1, end_col = 0, conceal_lines = '' })
             end
@@ -120,7 +134,9 @@ function M.apply(context, parser, marks)
                 add(block.start_row, { end_col = #first, conceal = '', virt_text_pos = 'inline',
                     virt_text = { { (closed and '▶ ' or '▼ ') .. block.title, 'InkstoneLink' } } })
                 if not closed then
-                    if block.summary then add(block.start_row + 1, { conceal_lines = '' }) end
+                    if block.summary_row then
+                        add(block.start_row + 1, { end_row = block.summary_row, end_col = 0, conceal_lines = '' })
+                    end
                     add(block.end_row - 1, { conceal_lines = '' })
                 end
             elseif closed then
@@ -137,7 +153,11 @@ function M.apply(context, parser, marks)
         for _, range in ipairs(hidden) do
             if mark.start_row >= range[1] and mark.start_row < range[2] then inside = true; break end
         end
-        if not inside then result[#result + 1] = mark end
+        -- A code fence without a language label normally hides its opening
+        -- delimiter. Keep that line visible when it becomes the fold anchor.
+        if not inside and not (anchors[mark.start_row] and mark.opts.conceal_lines) then
+            result[#result + 1] = mark
+        end
     end
     vim.list_extend(result, extra)
     return result
@@ -155,8 +175,12 @@ function M.toggle(buf, win)
             or not vim.api.nvim_win_is_valid(win) or vim.api.nvim_win_get_buf(win) ~= buf then return end
         local selected
         for _, block in ipairs(M.blocks(buf, parser, config)) do
-            if row >= block.start_row and row < block.end_row
-                and (not selected or block.end_row - block.start_row < selected.end_row - selected.start_row) then selected = block end
+            if row >= block.start_row and row < block.end_row then
+                if not selected or block.end_row - block.start_row < selected.end_row - selected.start_row then selected = block end
+                -- Hidden children cannot be the interaction target, even when
+                -- a source motion has placed the cursor inside the outer fold.
+                if M.closed(buf, block) then break end
+            end
         end
         if not selected then return end
         local value = entry(buf, selected)
@@ -171,6 +195,56 @@ function M.toggle(buf, win)
         require('inkstone.core.ui').update(buf, win, 'ToggleFold', true)
     end)
     return true
+end
+
+-- Explicit Normal-mode motions: count visible source rows and skip only fold
+-- conceal marks that are actually displayed. Raw/editing views remain native.
+---@param direction integer
+---@param count? integer
+function M.move(direction, count)
+    local buf = vim.api.nvim_get_current_buf()
+    local decorator = require('inkstone.core.ui').cache[buf]
+    local ranges = {}
+    if decorator and vim.wo.conceallevel >= 2 then
+        for _, extmark in ipairs(decorator:get()) do
+            local mark = extmark:get()
+            if mark.fold_hidden and extmark:shown() then
+                ranges[#ranges + 1] = { mark.start_row + 1, (mark.opts.end_row or mark.start_row) + 1 }
+            end
+        end
+    end
+    local motion = direction > 0 and 'j' or 'k'
+    if #ranges == 0 then
+        vim.cmd.normal({ args = { tostring(count or vim.v.count1) .. motion }, bang = true })
+        return
+    end
+    local last = vim.api.nvim_buf_line_count(buf)
+    for _ = 1, count or vim.v.count1 do
+        vim.cmd.normal({ args = { motion }, bang = true })
+        while true do
+            local row = vim.api.nvim_win_get_cursor(0)[1]
+            local target
+            for _, range in ipairs(ranges) do
+                if row >= range[1] and row <= range[2] then
+                    target = direction > 0 and range[2] + 1 or range[1] - 1
+                    -- At EOF there is no following visible row; use the anchor.
+                    if target > last then target = range[1] - 1 end
+                    break
+                end
+            end
+            if not target then break end
+            target = math.max(1, target)
+            if target == row then break end
+            -- Jump by source position, since a native fold inside this range
+            -- makes an equivalent count of j/k overshoot. Retain curswant so
+            -- short hidden lines do not steal the preferred screen column.
+            local view = vim.fn.winsaveview()
+            local col = math.max(0, vim.fn.virtcol2col(0, target, view.curswant + 1) - 1)
+            vim.api.nvim_win_set_cursor(0, { target, col })
+            vim.fn.winrestview({ curswant = view.curswant })
+            if vim.api.nvim_win_get_cursor(0)[1] == row then break end
+        end
+    end
 end
 
 function M.clear(buf)

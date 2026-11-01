@@ -44,7 +44,9 @@ function Render:run()
     self:delimiter()
     local wrapped = {} ---@type table<integer, render.md.mark.Line[]>
     for i, row in ipairs(self.data.rows) do
-        if self.data.layout.wrap and not self:row_fits(row) then
+        local images = false
+        for _, cell in ipairs(row.cells) do images = images or cell.images ~= nil end
+        if self.data.layout.wrap and (images or not self:row_fits(row)) then
             wrapped[i] = self:wrapped_row(row)
         else
             self:row(row)
@@ -72,6 +74,7 @@ end
 function Render:alternative()
     local views, context, data = require('inkstone.core.table_views'), self.context, self.data
     local lines, chart = nil, nil
+    require('inkstone.core.table_media').register(context, data.range)
     if self.view == 'list' then lines = views.cards(context, data)
     else
         local Chart = require('inkstone.text.chart')
@@ -229,6 +232,11 @@ function Render:wrapped_row(row)
         local col = self.data.cols[i]
         local units = assert(cell.units, 'missing cell units')
         cells[i] = Parser.wrap(units, col.width - 2 * padding, self.config.japanese)
+        for _, item in ipairs(cell.images or {}) do
+            local range = { self.node.start_row, self.node.end_row - (self.node.end_col == 0 and 1 or 0) }
+            local grid = require('inkstone.core.table_media').request(self.context, item, col.width - 2 * padding, range)
+            vim.list_extend(cells[i], grid or {})
+        end
         height = math.max(height, #cells[i])
     end
 

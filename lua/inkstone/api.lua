@@ -73,6 +73,14 @@ function M.toggle_fold()
     require('inkstone.core.folds').toggle()
 end
 
+function M.move_down()
+    require('inkstone.core.folds').move(1)
+end
+
+function M.move_up()
+    require('inkstone.core.folds').move(-1)
+end
+
 function M.toggle_table()
     require('inkstone.core.table_views').toggle()
 end
