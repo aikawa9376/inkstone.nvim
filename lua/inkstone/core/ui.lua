@@ -105,7 +105,9 @@ function Updater:run()
     if self.decorator ~= M.cache[self.buf] or not env.valid(self.buf, self.win) then
         return
     end
-    self.mode = env.mode.get() -- mode is only available after this point
+    -- Mode is global, but decorations belong to a buffer. Editing a scratch
+    -- must not remove an inactive buffer's reservations and change its height.
+    self.mode = self.buf == env.buf.current() and env.mode.get() or 'n'
     local native = self.config.paragraph.enabled and self.config.paragraph.wrap and not self.config.paragraph.join
     local paragraph_modes = env.mode.join(self.config.render_modes, self.config.paragraph.render_modes)
     -- Native navigation must keep its starting geometry through selections,

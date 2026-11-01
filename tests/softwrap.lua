@@ -232,8 +232,13 @@ return function(test, equal)
     end)
 
     test('source wrapping remains stable through anti-conceal and Markdown decorations', function()
-        equal(lua([=[
-            setup({'今日は**天気が**いいから散歩しましょう。'}, { anti_conceal = { enabled = false } })
+        local function decorated(wrap)
+            return lua([=[
+            local wrap = ...
+            setup({'今日は**天気が**いいから散歩しましょう。'}, {
+                anti_conceal = { enabled = false }, paragraph = { wrap = wrap },
+                win_options = { linebreak = { default = true, rendered = false } },
+            })
             local result = { rows(2) }
             vim.cmd('normal! gg0yg$')
             result[2] = vim.fn.getreg('"')
@@ -249,7 +254,17 @@ return function(test, equal)
             -- Four link icons survive, with no additional wrap padding.
             result[5] = padding_count() == 4 and vim.fn.getreg('"') == source .. '\n'
             return result
-        ]=]), { { '今日は天気がいいから', '散歩しましょう。' }, '今日は**天気が**いいから', 0, '散歩しましょう。', true })
+            ]=], wrap)
+        end
+        -- This source fills a native row, so it needs no padding. Neovim's
+        -- conceal-aware wrap changes where that native row ends; compare with
+        -- the installed editor's own behavior instead of pinning an old split.
+        local expected, actual = decorated(false), decorated(true)
+        equal(actual, expected)
+        equal(table.concat(actual[1]), '今日は天気がいいから散歩しましょう。')
+        equal(actual[2] .. actual[4], '今日は**天気が**いいから散歩しましょう。')
+        equal(actual[3], 0)
+        equal(actual[5], true)
     end)
 
     test('shared windows and nowrap use source wrapping and closing a split restores BudouX', function()
@@ -315,6 +330,44 @@ return function(test, equal)
             '今日は天気がいいから散歩', true, false, true,
             { ' abcdefghijklmnopqrstuvw', 'xyz' }, { true, 0 },
         })
+    end)
+
+    test('editing a decorated scratch keeps inactive buffer layout and window options', function()
+        lua([=[
+            setup({'今日は天気がいいから散歩しましょう。'})
+            _G.background_win, _G.background_buf = vim.api.nvim_get_current_win(), vim.api.nvim_get_current_buf()
+            _G.scratch_buf = vim.api.nvim_create_buf(false, true)
+            _G.scratch_win = vim.api.nvim_open_win(scratch_buf, true, {
+                relative = 'editor', row = 1, col = 4, width = 16, height = 6, style = 'minimal', border = 'single',
+            })
+            vim.api.nvim_buf_set_lines(scratch_buf, 0, -1, false, { 'scratch', '', '```lua', 'print(1)', '```' })
+            require('inkstone.state').get(scratch_buf, {
+                paragraph = { wrap = false, join = false }, typography = { enabled = false }, render_modes = { 'n', 't' },
+            })
+            vim.bo[scratch_buf].filetype = 'markdown'
+            vim.treesitter.start(scratch_buf, 'markdown')
+            require('inkstone.api').render({ buf = scratch_buf })
+            vim.wait(150)
+        ]=])
+        rpc('nvim_input', 'i')
+        equal(lua([=[
+            assert(vim.wait(1000, function() return vim.fn.mode() == 'i' end, 5))
+            -- Scratch-local geometry/decoration changes schedule background
+            -- refreshes through the ordinary OptionSet handler.
+            vim.wo.number = true
+            vim.wait(200)
+            local shown = 0
+            for _, mark in ipairs(require('inkstone.core.ui').cache[background_buf]:get()) do
+                if mark:shown() and mark:get().opts.virt_text_pos == 'inline' then shown = shown + 1 end
+            end
+            return { shown, vim.wo[background_win].conceallevel, vim.wo[background_win].linebreak,
+                vim.wo[scratch_win].conceallevel }
+        ]=]), { 1, 3, false, 0 })
+        rpc('nvim_input', '<Esc>')
+        lua([=[
+            assert(vim.wait(1000, function() return vim.fn.mode() == 'n' end, 5))
+            vim.api.nvim_win_close(scratch_win, true)
+        ]=])
     end)
 
     local data = vim.fn.stdpath('data')

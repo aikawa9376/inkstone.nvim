@@ -612,6 +612,67 @@ class TerminalTests(unittest.TestCase):
         self.pump(.3)
         self.assert_source()
 
+    def test_decorated_scratch_keeps_background_typography_geometry(self):
+        self.tmux('set-option', '-g', 'allow-passthrough', 'on')
+        self.render(['BEFORE', '', '# BACKGROUND', '', 'one', 'two', 'three', '', '# LOWER', '', 'AFTER'])
+        self.lua("vim.env.KITTY_WINDOW_ID='1'; _G.owner=vim.api.nvim_get_current_win(); "
+                 "_G.source=vim.api.nvim_get_current_buf(); require('inkstone.core.manager').init(); "
+                 "require('inkstone.core.manager').attach(_G.source); "
+                 "require('inkstone.api').render({buf=_G.source}); vim.wait(200)")
+        self.pump(.3)
+        height = int(self.lua('print(vim.api.nvim_win_text_height(_G.owner,{}).all)'))
+        original = json.loads(self.lua("local out={}; for _,r in ipairs(require('inkstone.core.typography').drawn) do "
+                                       "out[r.key]={r.screen_row,r.screen_col,r.width,r.height} end; print(vim.json.encode(out))"))
+        self.assertEqual(len(original), 2)
+        self.lua("_G.scratch=vim.api.nvim_create_buf(false,true); "
+                 "_G.popup=vim.api.nvim_open_win(_G.scratch,true,{relative='editor',row=2,col=4,width=45,height=4,"
+                 "style='minimal',border='single',title=' lazyagent '}); "
+                 "vim.api.nvim_buf_set_lines(_G.scratch,0,-1,false,{'SCRATCH','','```lua',\"print('hello')\",'```','','last'}); "
+                 "require('inkstone.state').get(_G.scratch,{typography={enabled=false},"
+                 "paragraph={wrap=false,join=false},render_modes={'n','t'}}); "
+                 "vim.bo[_G.scratch].filetype='markdown'; vim.treesitter.start(_G.scratch,'markdown'); "
+                 "require('inkstone.api').render({buf=_G.scratch}); vim.wait(200)")
+        self.pump(.2)
+
+        def check_geometry():
+            state = json.loads(self.lua("local t=require('inkstone.core.typography'); "
+                "local cfg=vim.api.nvim_win_get_config(_G.popup); local p=vim.api.nvim_win_get_position(_G.popup); "
+                "local cells={}; for row=p[1]+1,p[1]+cfg.height+2 do local line={}; "
+                "for col=p[2]+1,p[2]+cfg.width+2 do line[#line+1]=vim.fn.screenstring(row,col) end; "
+                "cells[#cells+1]=line end; print(vim.json.encode({active=t.active[_G.source]~=nil,"
+                "height=vim.api.nvim_win_text_height(_G.owner,{}).all,row=p[1],col=p[2],cells=cells}))"))
+            self.assertTrue(state['active'], 'editing scratch cleared background typography')
+            self.assertEqual(state['height'], height, 'background reservation height changed')
+            self.pump(.1)
+            for row, expected in enumerate(state['cells'], state['row']):
+                cells = self.screen.cpu_cells(row)
+                for col, text in enumerate(expected, state['col']):
+                    self.assertFalse(cells[col].get('mcd'), (row, col, cells[col]))
+                    self.assertEqual(cells[col]['text'] or ' ', text or ' ', (row, col, self.visible_text()))
+            self.assertIn('LOWER', self.scaled_text())
+            self.assertNotIn('BACKGROUND', self.scaled_text())
+
+        check_geometry()
+        for enabled in ('true', 'false', 'true'):
+            self.lua("vim.api.nvim_input('i')")
+            self.pump(.15)
+            self.lua('vim.wo.number=' + enabled + "; vim.wo.cursorline=" + enabled + "; "
+                     "require('inkstone.api').render({buf=_G.source}); vim.wait(150); vim.cmd('redraw!')")
+            self.pump(.2)
+            self.assertEqual(self.lua('print(vim.fn.mode())'), 'i')
+            check_geometry()
+            self.lua("vim.api.nvim_input('<Esc>')")
+            self.pump(.15)
+            self.lua("require('inkstone.api').render({buf=_G.scratch}); vim.wait(150); vim.cmd('redraw!')")
+            self.pump(.15)
+            check_geometry()
+        self.lua("vim.api.nvim_win_close(_G.popup,true); vim.cmd('redraw!')")
+        self.pump(.3)
+        restored = json.loads(self.lua("local out={}; for _,r in ipairs(require('inkstone.core.typography').drawn) do "
+                                       "out[r.key]={r.screen_row,r.screen_col,r.width,r.height} end; print(vim.json.encode(out))"))
+        self.assertEqual(restored, original)
+        self.assert_source()
+
     def test_fzf_filter_keeps_unrelated_heading_intact(self):
         if not shutil.which('fzf'):
             self.skipTest('fzf is not installed')

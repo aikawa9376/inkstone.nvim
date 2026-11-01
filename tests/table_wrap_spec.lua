@@ -328,11 +328,24 @@ describe('table wrapping', function()
             anti_conceal = { enabled = true },
             pipe_table = { cell = 'trimmed' },
         })
-        util.assert_screen({
-            '| Name | Description |', '| --- | --- |',
-            '| bold | Here is a long description', 'with a link and', 'some code and 行行行. |',
+        -- Source restoration delegates wrapping to Neovim. Conceal-aware
+        -- versions fit more visible text before a wrap; preserve the source
+        -- and inline-conceal contract without pinning the older wrap columns.
+        local screen = util.actual_screen()
+        assert.same({ '| Name | Description |', '| --- | --- |' }, { screen[1], screen[2] })
+        local short
+        for i, line in ipairs(screen) do
+            if line:find('| short |', 1, true) == 1 then short = i; break end
+        end
+        assert(short, 'the next source row must remain visible')
+        local body = {}
+        for i = 3, short - 1 do body[#body + 1] = screen[i] end
+        local text = vim.trim(table.concat(body, ' ')):gsub('%s+', ' ')
+        assert.same('| bold | Here is a long description with a link and some code and 行行行. |',
+            text)
+        assert.same({
             '| short | Another very long description', 'which should wrap into several lines nea', 'tly. |',
-        })
+        }, vim.list_slice(screen, short))
     end)
 
     it('cursor on wrapped row', function()

@@ -271,8 +271,13 @@ patch tmux or change its options. Cursor-only redraws leave unaffected overlays
 in place. Placement ownership is tracked per displayed line:
 command input and non-overlapping floating terminals (including fzf) do not
 erase other headings. Floating windows and popup menus take precedence only
-where they overlap. At the end of each Neovim redraw, visible sized text is
-replayed once after the native grid flush without first blanking it. Native
+where they overlap. Background layout is retained while a different scratch
+buffer is edited.
+Inactive buffers use normal-mode rendering; scratch-local Insert mode and
+decoration refreshes do not remove background row reservations. Covered glyphs
+stay hidden until the popup moves or closes. At the end of each Neovim redraw,
+visible sized text is replayed once after the native grid flush without first
+blanking it. Native
 output can erase multicells while writing identical spaces, so equal cell
 contents or missing source-row callbacks cannot safely skip repair. Idle
 H1/H2/H3 text is not resent. Layout/content changes clear obsolete

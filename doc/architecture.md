@@ -209,6 +209,16 @@ placements have one owner window. Showing the same buffer in multiple windows
 of its views. Window lifecycle changes force a new layout when the view set
 changes; returning to one window restores sizing. Separate buffers retain
 independent typography in their splits.
+`core/ui.lua:Updater:run` resolves editing mode per buffer: only the active
+buffer follows the global mode; inactive buffers retain normal-mode rendering.
+Scratch-local OptionSet or decoration refreshes must not apply the scratch's
+Insert mode to the background document. Clearing that document removes its
+scaled-row reservations, changes its height and moves later text under the
+float. Covered glyphs are still suppressed by occlusion while their layout
+remains intact. `tests/softwrap.lua` covers the buffer/window-option contract;
+`test_decorated_scratch_keeps_background_typography_geometry` checks actual
+Kitty multicells, the complete decorated popup rectangle, unchanged source
+height and restored heading coordinates across editing and decoration changes.
 ATX titles expose a direct `inline` child; Setext titles expose it through a
 `paragraph`. Both use the configured size for their heading level. Multiline
 Setext content is styled per source row and reserves scaled virtual rows for
