@@ -744,9 +744,9 @@ require('inkstone').setup({
         border_virtual = false,
         -- Gets placed in delimiter row for each column, position is based on alignment.
         alignment_indicator = '━',
-        -- Highlight for table heading, delimiter, and the line above.
+        -- Highlight for table heading and the line above.
         head = 'InkstoneTableHead',
-        -- Highlight for everything else, main table rows and the line below.
+        -- Highlight for the delimiter, main table rows, and the line below.
         row = 'InkstoneTableRow',
         -- Determines how the table as a whole is rendered.
         -- | none   | { enabled = false }        |
@@ -1520,9 +1520,9 @@ require('inkstone').setup({
         border_virtual = false,
         -- Gets placed in delimiter row for each column, position is based on alignment.
         alignment_indicator = '━',
-        -- Highlight for table heading, delimiter, and the line above.
+        -- Highlight for table heading and the line above.
         head = 'InkstoneTableHead',
-        -- Highlight for everything else, main table rows and the line below.
+        -- Highlight for the delimiter, main table rows, and the line below.
         row = 'InkstoneTableRow',
         -- Determines how the table as a whole is rendered.
         -- | none   | { enabled = false }        |

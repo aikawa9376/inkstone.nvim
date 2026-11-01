@@ -425,7 +425,7 @@ function M.table.delimiter(padding, ...)
                 :join('')
         end)
         :join('┼')
-    local line = { { '├' .. inner .. '┤', 'RmTableHead' } }
+    local line = { { '├' .. inner .. '┤', 'RmTableRow' } }
     if padding > 0 then
         line[#line + 1] = { (' '):rep(padding), 'RmPadding' }
     end

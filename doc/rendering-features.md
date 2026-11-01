@@ -168,6 +168,11 @@ This integration does not implement animated video playback.
 
 ## Table / list / chart
 
+Table headers and the top border use `pipe_table.head`. The separator below
+the header uses `pipe_table.row`, matching the body and bottom border. This
+keeps the downward stems of its junctions from extending the header emphasis
+into the body, including when the separator is rendered as a virtual row.
+
 Place the cursor in a table and run `:Inkstone toggle_table` to cycle through
 table → list → chart → table. `:Inkstone toggle_list` switches between table and
 list; `:Inkstone toggle_chart` switches between table and chart. A table without

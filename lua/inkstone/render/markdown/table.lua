@@ -139,14 +139,14 @@ function Render:delimiter()
         if width > self.context:window_width() then
             local line = self:line()
             line:extend(self.data.prefixes[delim.start_row])
-            line:text(delimiter, self.config.head)
+            line:text(delimiter, self.config.row)
             self.marks:replace(self.config, delim, { line:get() })
             return
         end
     end
     local line = self:line()
     line:pad(str.spaces('start', delim.text))
-    line:text(delimiter, self.config.head)
+    line:text(delimiter, self.config.row)
     line:pad(str.width(delim.text) - line:width())
     self.marks:over(self.config, 'table_border', delim, {
         virt_text = line:get(),
