@@ -133,6 +133,61 @@ return function(test, equal)
         lua('assert(vim.wait(1000, function() return vim.api.nvim_win_get_cursor(0)[1] == 3 end, 5))')
     end)
 
+    test('nested code folds have a visible summary across details close and reopen', function()
+        local result = lua([=[
+            setup({ 'BEFORE', '', '<details>', '', '<summary>Outer</summary>', '',
+                '```lua', 'UNIQUE_CODE_A', 'UNIQUE_CODE_B', '```', '', 'DETAILS_TAIL', '', '</details>', '', 'AFTER' }, {
+                code = { position = 'right', width = 'block', language_pad = 1, left_pad = 1, right_pad = 1, min_width = 40 },
+            })
+            local function toggle(row)
+                vim.api.nvim_win_set_cursor(0, { row, 0 })
+                require('inkstone.api').toggle_view()
+                refresh()
+                return table.concat(rows(18), '\n')
+            end
+            local result = { open = toggle(3), code_closed = toggle(8), parent_closed = toggle(3), parent_reopened = toggle(3) }
+            result.code_opened = toggle(7)
+            return result
+        ]=])
+        assert(result.open:find('UNIQUE_CODE_A', 1, true))
+        assert(not result.code_closed:find('UNIQUE_CODE_A', 1, true))
+        assert(result.code_closed:find('▶ 3 lines', 1, true), 'collapsed code must have a visible summary')
+        assert(result.code_closed:find('· lua', 1, true))
+        assert(not result.parent_closed:find('DETAILS_TAIL', 1, true))
+        assert(result.parent_reopened:find('▶ 3 lines', 1, true), 'nested collapsed state must be visibly identifiable')
+        assert(result.parent_reopened:find('DETAILS_TAIL', 1, true))
+        assert(result.code_opened:find('UNIQUE_CODE_A', 1, true))
+    end)
+
+    test('closed details and code stay closed when anti-conceal margins touch their body', function()
+        local result = lua([=[
+            setup({ 'BEFORE', '', '<details>', '', '<summary>Outer</summary>', '',
+                '```lua', 'UNIQUE_CODE_A', 'UNIQUE_CODE_B', '```', '', 'DETAILS_TAIL', '', '</details>', '', 'AFTER' }, {
+                anti_conceal = { enabled = true, above = 1, below = 1 },
+            })
+            local function toggle(row)
+                vim.api.nvim_win_set_cursor(0, { row, 0 })
+                require('inkstone.api').toggle_view()
+                refresh()
+                return table.concat(rows(18), '\n')
+            end
+            local result = { open = toggle(3), code_closed = toggle(8), parent_closed = toggle(3) }
+            vim.api.nvim_win_set_cursor(0, { 8, 0 })
+            refresh()
+            result.source_entry = table.concat(rows(18), '\n')
+            vim.api.nvim_win_set_cursor(0, { 3, 0 })
+            refresh()
+            result.source_exit = table.concat(rows(18), '\n')
+            return result
+        ]=])
+        assert(result.open:find('UNIQUE_CODE_A', 1, true))
+        assert(not result.code_closed:find('UNIQUE_CODE_A', 1, true), 'anti-conceal margin reopened a closed code body')
+        assert(not result.parent_closed:find('UNIQUE_CODE_A', 1, true), 'anti-conceal margin reopened a closed parent body')
+        assert(not result.parent_closed:find('DETAILS_TAIL', 1, true))
+        assert(result.source_entry:find('UNIQUE_CODE_A', 1, true), 'deliberate source entry must still follow anti-conceal')
+        assert(not result.source_exit:find('UNIQUE_CODE_A', 1, true))
+    end)
+
     test('fold motions skip long hidden code and details, preserve counts and leave raw views native', function()
         local result = lua([=[
             local lines = { 'BEFORE', '', '<details>', '', '<summary>Heading Configuration</summary>', '', '```lua' }
@@ -206,6 +261,7 @@ return function(test, equal)
         equal(result[3], { 1, 7 })
         equal(result[4], { 2, 0 })
         assert(table.concat(result[5], '\n'):find('▶ 2 lines', 1, true))
+        assert(not table.concat(result[5], '\n'):find('`', 1, true), 'a bare fence must not become a language label')
     end)
 
     test('side preview maps fold movement without changing source keybindings', function()

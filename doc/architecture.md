@@ -173,6 +173,16 @@ closing details tag are hidden while expanded. Toggle selection stops at a
 collapsed ancestor, so source motions into its hidden code cannot toggle that
 child. Closed code folds retain a visible delimiter/summary anchor even without
 a language label.
+Their dedicated inline summary replaces renderer-owned marks on the opening
+fence (retaining any container prefix), so language overlays and code padding
+cannot cover the collapse indicator. It remains visible at the cursor during
+rendering; raw/Visual mode still follows the normal render-mode policy.
+Closed body marks carry `fold_closed`: `Updater:hide` ignores anti-conceal
+margin-only overlap when the actual cursor is outside that body. Deliberate
+source entry can still restore it under enabled anti-conceal. Child fold state
+is independent and survives parent close/reopen. `tests/softwrap.lua` covers
+nested open/close cycles with right-aligned, padded code labels and anti-conceal
+margins that previously caused absent indicators or visible collapsed bodies.
 
 `folds.attach` installs buffer-local Normal-mode `j/k`, `gj/gk` and Up/Down
 defaults in all attached buffers before `on.attach`, so user overrides remain

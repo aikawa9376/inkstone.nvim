@@ -3,6 +3,7 @@ local log = require('inkstone.core.log')
 
 ---@class (exact) render.md.Mark
 ---@field fold_hidden? boolean
+---@field fold_closed? boolean
 ---@field modes? render.md.Modes
 ---@field conceal render.md.mark.Conceal
 ---@field start_row integer

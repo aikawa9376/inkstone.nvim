@@ -44,7 +44,7 @@ function M.blocks(buf, parser, config, view)
                         end
                     end
                 elseif kind == 'code' and config.code then
-                    blocks[#blocks + 1] = { kind = kind, start_row = sr, end_row = finish, closed = false }
+                    blocks[#blocks + 1] = { kind = kind, start_row = sr, start_col = sc, end_row = finish, closed = false }
                 elseif kind == 'callout' and config.callout then
                     local first = vim.api.nvim_buf_get_lines(buf, sr, sr + 1, false)[1] or ''
                     local suffix = first:match('^%s*>%s*%[![%w_-]+%]([+-]?)')
@@ -112,9 +112,9 @@ function M.apply(context, parser, marks)
     if not config.enabled then return marks end
     local blocks = M.blocks(context.buf, parser, config, context.view)
     local hidden, extra = {}, {}
-    local anchors = {}
-    local function add(row, opts)
-        extra[#extra + 1] = { conceal = true, modes = config.render_modes, start_row = row, start_col = 0,
+    local anchors, code_anchors = {}, {}
+    local function add(row, opts, col)
+        extra[#extra + 1] = { conceal = true, modes = config.render_modes, start_row = row, start_col = col or 0,
             fold_hidden = opts.conceal_lines ~= nil, opts = opts }
     end
     for _, block in ipairs(blocks) do
@@ -128,6 +128,7 @@ function M.apply(context, parser, marks)
                 anchors[block.start_row] = true
                 hidden[#hidden + 1] = { block.start_row + 1, block.end_row }
                 add(block.start_row + 1, { end_row = block.end_row - 1, end_col = 0, conceal_lines = '' })
+                extra[#extra].fold_closed = true
             end
             if block.kind == 'details' then
                 local first = vim.api.nvim_buf_get_lines(context.buf, block.start_row, block.start_row + 1, false)[1] or ''
@@ -139,6 +140,18 @@ function M.apply(context, parser, marks)
                     end
                     add(block.end_row - 1, { conceal_lines = '' })
                 end
+            elseif closed and block.kind == 'code' then
+                local first = vim.api.nvim_buf_get_lines(context.buf, block.start_row, block.start_row + 1, false)[1] or ''
+                local info = first:match('[`~]+(.*)$') or ''
+                local language = info:match('^%s*(%S+)')
+                local label = { { ('▶ %d lines'):format(block.end_row - block.start_row - 1), 'Comment' } }
+                if language then label[#label + 1] = { ' · ' .. language, context.config.code.highlight_fallback } end
+                code_anchors[block.start_row] = block.start_col or 0
+                add(block.start_row, { end_col = #first, conceal = '', virt_text_pos = 'inline', virt_text = label }, block.start_col)
+                -- This is an explicit fold control; keep its state visible at
+                -- the cursor while Normal-mode rendering remains active.
+                extra[#extra].conceal = false
+                extra[#extra].folded = true
             elseif closed then
                 add(block.start_row, { virt_text_pos = 'eol', virt_text = {
                     { (' ▶ %d lines'):format(block.end_row - block.start_row - 1), 'Comment' },
@@ -155,7 +168,9 @@ function M.apply(context, parser, marks)
         end
         -- A code fence without a language label normally hides its opening
         -- delimiter. Keep that line visible when it becomes the fold anchor.
-        if not inside and not (anchors[mark.start_row] and mark.opts.conceal_lines) then
+        local code_col = code_anchors[mark.start_row]
+        if not inside and not (anchors[mark.start_row] and mark.opts.conceal_lines)
+            and not (code_col and mark.start_col >= code_col) then
             result[#result + 1] = mark
         end
     end

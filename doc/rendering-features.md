@@ -402,6 +402,14 @@ its title; blank lines before the summary are allowed. Nested details are
 supported. Toggle state follows inserted lines using buffer-local extmark
 anchors and is released on buffer wipe/setup.
 
+Code fences have independent fold state inside details. `Ctrl+i` on code folds
+the code; use the details title to fold the enclosing details. Reopening a
+parent preserves the children's states. A collapsed code block has a dedicated
+`▶ N lines · language` summary that stays visible at the cursor and cannot be
+covered by the usual code-language overlay or padding. Anti-conceal margins
+around the visible fold anchor do not reopen a collapsed body; deliberate
+cursor entry into its source can still restore it when anti-conceal is enabled.
+
 Attached buffers, including ordinary Markdown buffers and the side preview,
 automatically have Normal-mode, buffer-local `j/k`, `gj/gk` and Up/Down mappings
 that skip hidden fold bodies, summary tags and closing details tags. Additional

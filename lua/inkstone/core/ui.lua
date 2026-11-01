@@ -270,6 +270,13 @@ function Updater:hide(extmark, range)
         return true
     end
 
+    -- Cursor margins must not undo an explicit collapse from its visible
+    -- anchor. Deliberate source entry (search/G/API) can still reveal the body.
+    if mark.fold_closed then
+        local row = env.row.get(self.buf, self.win)
+        if not row or row < mark.start_row or row > (mark.opts.end_row or mark.start_row) then return false end
+    end
+
     -- does not overlap with hidden range -> show
     if not extmark:overlaps(range) then
         return false
