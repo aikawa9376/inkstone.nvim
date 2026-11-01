@@ -177,6 +177,9 @@ Their dedicated inline summary replaces renderer-owned marks on the opening
 fence (retaining any container prefix), so language overlays and code padding
 cannot cover the collapse indicator. It remains visible at the cursor during
 rendering; raw/Visual mode still follows the normal render-mode policy.
+Collapsed details use the same count-first control, `▶ N lines · title`, where
+N is the number of hidden source rows (including summary/blank lines and the
+closing tag). It remains visible at the cursor; expanded details keep `▼ title`.
 Closed body marks carry `fold_closed`: `Updater:hide` ignores anti-conceal
 margin-only overlap when the actual cursor is outside that body. Deliberate
 source entry can still restore it under enabled anti-conceal. Child fold state

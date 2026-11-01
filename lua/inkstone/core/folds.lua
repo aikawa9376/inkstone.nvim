@@ -132,8 +132,13 @@ function M.apply(context, parser, marks)
             end
             if block.kind == 'details' then
                 local first = vim.api.nvim_buf_get_lines(context.buf, block.start_row, block.start_row + 1, false)[1] or ''
+                local label = closed and {
+                    { ('▶ %d lines'):format(block.end_row - block.start_row - 1), 'Comment' },
+                    { ' · ' .. block.title, 'InkstoneLink' },
+                } or { { '▼ ' .. block.title, 'InkstoneLink' } }
                 add(block.start_row, { end_col = #first, conceal = '', virt_text_pos = 'inline',
-                    virt_text = { { (closed and '▶ ' or '▼ ') .. block.title, 'InkstoneLink' } } })
+                    virt_text = label })
+                if closed then extra[#extra].conceal = false end
                 if not closed then
                     if block.summary_row then
                         add(block.start_row + 1, { end_row = block.summary_row, end_col = 0, conceal_lines = '' })

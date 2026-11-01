@@ -404,7 +404,10 @@ anchors and is released on buffer wipe/setup.
 
 Code fences have independent fold state inside details. `Ctrl+i` on code folds
 the code; use the details title to fold the enclosing details. Reopening a
-parent preserves the children's states. A collapsed code block has a dedicated
+parent preserves the children's states. Collapsed details display
+`▶ N lines · title`, counting the hidden source rows, including summary/blank
+lines and the closing tag. Expanded details display `▼ title`.
+A collapsed code block has a dedicated
 `▶ N lines · language` summary that stays visible at the cursor and cannot be
 covered by the usual code-language overlay or padding. Anti-conceal margins
 around the visible fold anchor do not reopen a collapsed body; deliberate

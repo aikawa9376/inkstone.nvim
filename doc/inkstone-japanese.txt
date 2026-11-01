@@ -82,6 +82,7 @@ hidden child opens its collapsed parent first.
 Code folds inside details are independent and keep their state across parent
 close/reopen. Ctrl+i on code toggles code; use the details title for the parent.
 A dedicated "▶ N lines · language" code summary stays visible while rendered.
+Closed details similarly show "▶ N lines · title"; N counts hidden source rows.
 Anti-conceal margins around the anchor do not reopen collapsed bodies.
 <Plug>(InkstoneMoveDown) and <Plug>(InkstoneMoveUp) skip hidden fold rows in
 Normal mode, with counts. All attached buffers automatically map j/k, gj/gk
