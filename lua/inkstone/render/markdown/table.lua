@@ -1,5 +1,6 @@
 local Base = require('inkstone.render.base')
 local Parser = require('inkstone.parser.table')
+local colors = require('inkstone.core.colors')
 local env = require('inkstone.lib.env')
 local iter = require('inkstone.lib.iter')
 local str = require('inkstone.lib.str')
@@ -7,6 +8,7 @@ local str = require('inkstone.lib.str')
 ---@class render.md.render.Table: render.md.Render
 ---@field private config render.md.table.Config
 ---@field private data render.md.table.Data
+---@field private head string
 local Render = setmetatable({}, Base)
 Render.__index = Render
 
@@ -37,6 +39,7 @@ end
 ---@protected
 function Render:run()
     if self.view ~= 'table' then self:alternative(); return end
+    self.head = colors.with_bold(self.config.head, self.config.head_bold)
     local first_mark = #self.marks:get() + 1
     self:delimiter()
     local wrapped = {} ---@type table<integer, render.md.mark.Line[]>
@@ -139,14 +142,14 @@ function Render:delimiter()
         if width > self.context:window_width() then
             local line = self:line()
             line:extend(self.data.prefixes[delim.start_row])
-            line:text(delimiter, self.config.row)
+            line:text(delimiter, self.head)
             self.marks:replace(self.config, delim, { line:get() })
             return
         end
     end
     local line = self:line()
     line:pad(str.spaces('start', delim.text))
-    line:text(delimiter, self.config.row)
+    line:text(delimiter, self.head)
     line:pad(str.width(delim.text) - line:width())
     self.marks:over(self.config, 'table_border', delim, {
         virt_text = line:get(),
@@ -159,7 +162,7 @@ end
 function Render:row(row)
     local icon = self.config.border[10]
     local header = row.node.type == 'pipe_table_header'
-    local highlight = header and self.config.head or self.config.row
+    local highlight = header and self.head or self.config.row
 
     if vim.tbl_contains({ 'trimmed', 'padded', 'raw' }, self.config.cell) then
         for _, pipe in ipairs(row.pipes) do
@@ -218,7 +221,7 @@ function Render:wrapped_row(row)
     local padding = self.config.padding
     local icon = self.config.border[10]
     local header = row.node.type == 'pipe_table_header'
-    local highlight = header and self.config.head or self.config.row
+    local highlight = header and self.head or self.config.row
 
     local cells = {} ---@type render.md.mark.Line[][]
     local height = 1
@@ -350,7 +353,7 @@ function Render:border(wrapped)
     local function table_border(index, above, chars)
         local item = rows[index]
         local text = chars[1] .. table.concat(parts, chars[2]) .. chars[3]
-        local highlight = above and self.config.head or self.config.row
+        local highlight = above and self.head or self.config.row
         local line = self:line():pad(self.data.layout.col):text(text, highlight)
 
         local virtual = self.config.border_virtual

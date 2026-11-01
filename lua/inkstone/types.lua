@@ -317,6 +317,7 @@
 ---@field border_virtual? boolean
 ---@field alignment_indicator? string
 ---@field head? string
+---@field head_bold? boolean
 ---@field row? string
 ---@field style? render.md.table.Style
 

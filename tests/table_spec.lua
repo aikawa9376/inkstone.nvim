@@ -209,7 +209,7 @@ describe('table', function()
             virt_text = {
                 {
                     '│ Heading 1 │ `Heading 2`            │',
-                    'RmTableHead',
+                    'Rm_RmTableHead_bold_0',
                 },
             },
             virt_text_pos = 'overlay',
@@ -250,7 +250,7 @@ describe('table', function()
 
         marks:add(row:get(1), 0, util.table.border(true, true, 11, 11))
         marks:add(row:get(0, 0), { 0, 25 }, {
-            virt_text = { { '│ Heading 1 │ Heading 2 │', 'RmTableHead' } },
+            virt_text = { { '│ Heading 1 │ Heading 2 │', 'Rm_RmTableHead_bold_0' } },
             virt_text_pos = 'overlay',
         })
         marks:add(

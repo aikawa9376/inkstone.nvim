@@ -15,6 +15,57 @@ return function(test, equal, buffer)
         return buf, parser, ctx, require('inkstone.core.handlers').run(ctx, parser)
     end
 
+    test('table heading borders preserve color with opt-in RGB and cterm bold', function()
+        local colors = require('inkstone.core.colors')
+        local source = 'InkstoneTestTableHead'
+        vim.api.nvim_set_hl(0, source, { fg = 0x89abcd, bg = 0x102030, bold = true,
+            italic = true, ctermfg = 12, cterm = { bold = true, italic = true } })
+        local groups = {}
+        for _, bold in ipairs({ false, true }) do
+            for _, virtual in ipairs({ false, true }) do
+                local delim = virtual and string.rep('-', 200) or '---'
+                local buf, _, ctx, marks = parse({ '', '| Name | Value |',
+                    '| ' .. delim .. ' | --- |', '| A | 1 |', '' }, {
+                    pipe_table = { head = source, head_bold = bold },
+                })
+                equal(ctx.config.pipe_table.head_bold, bold)
+                equal(require('inkstone.state').validate(), {})
+                local found = {}
+                local function check(line)
+                    for _, chunk in ipairs(line) do
+                        for _, glyph in ipairs({ '┌', '├' }) do
+                            if chunk[1]:find(glyph, 1, true) then
+                                found[glyph] = true
+                                local hl = vim.api.nvim_get_hl(0, { name = chunk[2], link = false })
+                                equal({ hl.fg, hl.bg, hl.italic, hl.bold == true },
+                                    { 0x89abcd, 0x102030, true, bold })
+                                equal({ hl.ctermfg, hl.cterm.italic, hl.cterm.bold == true }, { 12, true, bold })
+                                groups[bold and 'on' or 'off'] = chunk[2]
+                            end
+                        end
+                    end
+                end
+                for _, mark in ipairs(marks) do
+                    if mark.opts.virt_text then check(mark.opts.virt_text) end
+                    for _, line in ipairs(mark.opts.virt_lines or {}) do check(line) end
+                    for _, line in ipairs(mark.replace or {}) do check(line) end
+                end
+                assert(found['┌'] and found['├'], 'top border and delimiter must both be styled')
+                vim.api.nvim_buf_delete(buf, { force = true })
+            end
+        end
+        assert(groups.on ~= groups.off, 'buffer-specific bold must not mutate a shared group')
+        assert(vim.api.nvim_get_hl(0, { name = source, link = false }).bold)
+        assert(not vim.api.nvim_get_hl(0, { name = groups.off, link = false }).bold)
+        vim.api.nvim_set_hl(0, source, { fg = 0x556677, bold = true })
+        colors.reload()
+        for name, group in pairs(groups) do
+            local hl = vim.api.nvim_get_hl(0, { name = group, link = false })
+            equal({ hl.fg, hl.bold == true }, { 0x556677, name == 'on' })
+        end
+        equal(inkstone.default.pipe_table.head_bold, false)
+    end)
+
     test('code examples exclude injected decorations, folds, media and table views by default', function()
         local typography = require('inkstone.core.typography')
         local supports = typography.supports

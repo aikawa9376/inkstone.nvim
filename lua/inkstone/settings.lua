@@ -1730,6 +1730,7 @@ M.pipe_table = {}
 ---@field border_virtual boolean
 ---@field alignment_indicator string
 ---@field head string
+---@field head_bold boolean
 ---@field row string
 ---@field style render.md.table.Style
 
@@ -1807,9 +1808,12 @@ M.pipe_table.default = {
     border_virtual = false,
     -- Gets placed in delimiter row for each column, position is based on alignment.
     alignment_indicator = '━',
-    -- Highlight for table heading and the line above.
+    -- Highlight for table heading, delimiter, and the line above.
     head = 'InkstoneTableHead',
-    -- Highlight for the delimiter, main table rows, and the line below.
+    -- Use bold for heading borders, including the top border and delimiter.
+    -- Does not override native syntax or explicit inline Markdown styles.
+    head_bold = false,
+    -- Highlight for everything else, main table rows and the line below.
     row = 'InkstoneTableRow',
     -- Determines how the table as a whole is rendered.
     -- | none   | { enabled = false }        |
@@ -1836,6 +1840,7 @@ function M.pipe_table.schema()
         border_virtual = { type = 'boolean' },
         alignment_indicator = { type = 'string' },
         head = { type = 'string' },
+        head_bold = { type = 'boolean' },
         row = { type = 'string' },
         style = { enum = M.pipe_table.style },
     })

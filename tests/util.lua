@@ -376,7 +376,7 @@ M.table = {}
 ---@param head boolean
 ---@return vim.api.keyset.set_extmark
 function M.table.pipe(head)
-    local highlight = head and 'RmTableHead' or 'RmTableRow'
+    local highlight = head and 'Rm_RmTableHead_bold_0' or 'RmTableRow'
     ---@type vim.api.keyset.set_extmark
     return {
         virt_text = { { '│', highlight } },
@@ -390,7 +390,7 @@ end
 ---@return vim.api.keyset.set_extmark
 function M.table.border(virtual, above, ...)
     local chars = above and { '┌', '┬', '┐' } or { '└', '┴', '┘' }
-    local highlight = above and 'RmTableHead' or 'RmTableRow'
+    local highlight = above and 'Rm_RmTableHead_bold_0' or 'RmTableRow'
     local inner = vim.iter({ ... })
         :map(function(length)
             return ('─'):rep(length)
@@ -425,7 +425,7 @@ function M.table.delimiter(padding, ...)
                 :join('')
         end)
         :join('┼')
-    local line = { { '├' .. inner .. '┤', 'RmTableRow' } }
+    local line = { { '├' .. inner .. '┤', 'Rm_RmTableHead_bold_0' } }
     if padding > 0 then
         line[#line + 1] = { (' '):rep(padding), 'RmPadding' }
     end

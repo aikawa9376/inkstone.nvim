@@ -71,6 +71,8 @@ M.cache = {}
 M.cache.combine = {}
 ---@type table<string, { hl: string, visible: boolean }>
 M.cache.bg_as_fg = {}
+---@type table<string, { hl: string, bold: boolean, attrs: table }>
+M.cache.bold = {}
 
 ---called from plugin directory
 function M.init()
@@ -100,6 +102,27 @@ function M.reload()
     for _, color in pairs(M.cache.bg_as_fg) do
         M.bg_as_fg(color.hl, true)
     end
+    for _, color in pairs(M.cache.bold) do
+        M.with_bold(color.hl, color.bold, true)
+    end
+end
+
+---Derive a style without changing the user's source highlight or other buffers.
+---@param highlight string
+---@param bold boolean
+---@param force? boolean
+---@return string
+function M.with_bold(highlight, bold, force)
+    local name = ('%s_%s_bold_%d'):format(M.prefix, highlight, bold and 1 or 0)
+    local attrs = M.get_hl(highlight)
+    attrs.bold = bold
+    if attrs.cterm then attrs.cterm.bold = bold end
+    local cached = M.cache.bold[name]
+    if force or not cached or not vim.deep_equal(cached.attrs, attrs) then
+        vim.api.nvim_set_hl(0, name, attrs)
+        M.cache.bold[name] = { hl = highlight, bold = bold, attrs = attrs }
+    end
+    return name
 end
 
 ---@param foreground string

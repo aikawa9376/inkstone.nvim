@@ -168,10 +168,13 @@ This integration does not implement animated video playback.
 
 ## Table / list / chart
 
-Table headers and the top border use `pipe_table.head`. The separator below
-the header uses `pipe_table.row`, matching the body and bottom border. This
-keeps the downward stems of its junctions from extending the header emphasis
-into the body, including when the separator is rendered as a virtual row.
+The top border, header pipes and header/body separator use the color and styles
+from `pipe_table.head`. Their font weight is controlled by `pipe_table.head_bold`
+(default `false`), which removes inherited bold without changing the theme's
+heading highlight. Set it to `true` for bold heading borders. Source-based and
+wrapped virtual rows use the same setting; inline cell contents retain their
+syntax and explicit Markdown styles. Body rows and the bottom border use
+`pipe_table.row`.
 
 Place the cursor in a table and run `:Inkstone toggle_table` to cycle through
 table → list → chart → table. `:Inkstone toggle_list` switches between table and
@@ -183,6 +186,7 @@ explains why it cannot chart the data.
 require('inkstone').setup({
     pipe_table = {
         view = 'table', -- default view; 'list' / 'chart' also available
+        head_bold = false, -- true enables bold heading borders
         view_max_rows = 1000,
         chart = { kind = 'bar', height = 12 }, -- kind can be 'line'
     },
