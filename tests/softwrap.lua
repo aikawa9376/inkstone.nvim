@@ -101,31 +101,71 @@ return function(test, equal)
         ]=]), { { 'English 今日は天気が', 'いいから散歩しましょう。' }, false, true })
     end)
 
-    test('interactive selection and pending operators keep native rows across ModeChanged events', function()
-        lua("setup({'今日は天気がいいから散歩しましょう。'})")
+    test('Visual modes temporarily reveal source in Markdown and ACP buffers and restore on exit', function()
+        for _, ft in ipairs({ 'markdown', 'lazyagent_acp' }) do
+            lua([=[
+                local ft = ...
+                setup({'今日は天気がいいから散歩しましょう。'}, {
+                    file_types = { 'markdown', 'lazyagent_acp' },
+                    overrides = { filetype = { lazyagent_acp = { render_modes = { 'n', 't' }, typography = { enabled = false } } } },
+                })
+                if ft == 'lazyagent_acp' then
+                    vim.treesitter.language.register('markdown', ft)
+                    vim.bo.buftype, vim.bo.filetype = 'nofile', ft
+                    require('inkstone.state').cache[vim.api.nvim_get_current_buf()] = nil
+                    refresh()
+                end
+            ]=], ft)
+            for _, visual in ipairs({ { 'v', 'v' }, { 'V', 'V' }, { '<C-v>', '\22' } }) do
+                rpc('nvim_input', visual[1])
+                equal(lua([=[
+                    local mode = ...
+                    assert(vim.wait(1000, function() return vim.fn.mode() == mode end, 5))
+                    vim.wait(150)
+                    return { padding_count(), rows(2), vim.wo.linebreak, vim.wo.conceallevel }
+                ]=], visual[2]), { 0, { '今日は天気がいいから散歩', 'しましょう。' }, true, 0 })
+                rpc('nvim_input', '<Esc>')
+                equal(lua([=[
+                    assert(vim.wait(1000, function() return vim.fn.mode() == 'n' end, 5))
+                    vim.wait(150)
+                    return { padding_count(), rows(2), vim.wo.linebreak, vim.wo.conceallevel }
+                ]=]), { 1, { '今日は天気がいいから', '散歩しましょう。' }, false, 3 })
+            end
+            rpc('nvim_input', 'v')
+            lua([=[
+                assert(vim.wait(1000, function() return vim.fn.mode() == 'v' end, 5))
+                vim.wait(150)
+            ]=])
+            rpc('nvim_input', 'g$')
+            rpc('nvim_input', 'y')
+            equal(lua([=[
+                assert(vim.wait(1000, function() return vim.fn.mode() == 'n' end, 5))
+                return vim.fn.getreg('"')
+            ]=]), '今日は天気がいいから散歩')
+        end
+    end)
+
+    test('Visual reveals Markdown delimiters and can explicitly opt into rendering', function()
+        lua("setup({'# Title', '', '**bold** text'})")
         rpc('nvim_input', 'v')
         equal(lua([=[
             assert(vim.wait(1000, function() return vim.fn.mode() == 'v' end, 5))
             vim.wait(150)
-            return { padding_count(), rows(2), vim.wo.linebreak }
-        ]=]), { 1, { '今日は天気がいいから', '散歩しましょう。' }, false })
-        rpc('nvim_input', 'g$')
-        rpc('nvim_input', 'y')
+            return rows(3)
+        ]=]), { '# Title', '', '**bold** text' })
+        rpc('nvim_input', '<Esc>')
+        lua("setup({'今日は天気がいいから散歩しましょう。'}, { render_modes = { 'n', 'v' } })")
+        rpc('nvim_input', 'v')
         equal(lua([=[
-            assert(vim.wait(1000, function() return vim.fn.mode() == 'n' end, 5))
-            return vim.fn.getreg('"')
-        ]=]), '今日は天気がいいから')
-        rpc('nvim_input', 'V')
-        equal(lua([=[
-            assert(vim.wait(1000, function() return vim.fn.mode() == 'V' end, 5))
+            assert(vim.wait(1000, function() return vim.fn.mode() == 'v' end, 5))
             vim.wait(150)
-            return { padding_count(), rows(2) }
-        ]=]), { 1, { '今日は天気がいいから', '散歩しましょう。' } })
-        rpc('nvim_input', 'y')
-        equal(lua([=[
-            assert(vim.wait(1000, function() return vim.fn.mode() == 'n' end, 5))
-            return vim.fn.getreg('"')
-        ]=]), '今日は天気がいいから散歩しましょう。\n')
+            return { padding_count(), rows(2), vim.wo.conceallevel }
+        ]=]), { 1, { '今日は天気がいいから', '散歩しましょう。' }, 3 })
+        rpc('nvim_input', '<Esc>')
+    end)
+
+    test('pending operators keep native rows across ModeChanged events', function()
+        lua("setup({'今日は天気がいいから散歩しましょう。'})")
         rpc('nvim_input', 'y')
         equal(lua([=[
             assert(vim.wait(1000, function() return vim.fn.mode(1):sub(1, 2) == 'no' end, 5))

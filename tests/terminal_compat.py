@@ -673,6 +673,35 @@ class TerminalTests(unittest.TestCase):
         self.assertEqual(restored, original)
         self.assert_source()
 
+    def test_visual_temporarily_restores_source_and_recovers_large_headings(self):
+        self.tmux('set-option', '-g', 'allow-passthrough', 'on')
+        self.render(['BEFORE', '', '# LARGE', '', '**bold** [link](https://example.org)', '', 'AFTER'])
+        self.lua("vim.env.KITTY_WINDOW_ID='1'; _G.source=vim.api.nvim_get_current_buf(); "
+                 "require('inkstone.core.manager').init(); require('inkstone.core.manager').attach(_G.source); "
+                 "require('inkstone.api').render({buf=_G.source}); vim.wait(200)")
+        self.pump(.3)
+        self.assertIn('LARGE', self.scaled_text())
+        height = int(self.lua('print(vim.api.nvim_win_text_height(0,{}).all)'))
+        for key, mode in (('v', 'v'), ('V', 'V'), ('<C-v>', '\x16')):
+            self.lua('vim.api.nvim_input(' + json.dumps(key) + ')')
+            self.pump(.25)
+            state = json.loads(self.lua("print(vim.json.encode({mode=vim.fn.mode(),conceal=vim.wo.conceallevel,"
+                 "active=require('inkstone.core.typography').active[_G.source]~=nil,"
+                 "height=vim.api.nvim_win_text_height(0,{}).all}))"))
+            self.assertEqual(state['mode'], mode)
+            self.assertEqual(state['conceal'], 0)
+            self.assertFalse(state['active'])
+            self.assertLess(state['height'], height)
+            self.assertIn('# LARGE', self.visible_text())
+            self.assertIn('**bold** [link](https://example.org)', self.visible_text())
+            self.assertNotIn('LARGE', self.scaled_text())
+            self.lua("vim.api.nvim_input('<Esc>')")
+            self.pump(.3)
+            self.assertIn('LARGE', self.scaled_text())
+            self.assertNotIn('**bold**', self.visible_text())
+            self.assertEqual(int(self.lua('print(vim.api.nvim_win_text_height(0,{}).all)')), height)
+            self.assert_source()
+
     def test_popup_border_beside_decorated_multicell_lower_row_does_not_shift(self):
         self.tmux('set-option', '-g', 'allow-passthrough', 'on')
         self.render(['BEFORE', '', '## 要件', '', 'body', '', 'AFTER'])

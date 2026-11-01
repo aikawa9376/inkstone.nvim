@@ -99,9 +99,14 @@ source byte offsets and first/continuation budgets, matching native gutters,
 breakindent/showbreak and paragraph padding. Native motions/operators own source
 positions; anti-conceal does not remove wrap padding. Native conceal can leave
 short-looking rows because budgets include source Markdown delimiters.
+Visual modes follow `render_modes`; ordinary defaults omit them, so selection
+temporarily restores raw Markdown, source wrapping and window options. Leaving
+Visual restores decorations and native BudouX padding. Explicit Visual entries
+or `render_modes=true` retain rendering. No blanket Visual-to-Normal override
+is applied: source selection takes precedence over keeping rendered geometry.
 When native paragraphs and normal-mode rendering are enabled, UI rendering
-retains normal-mode geometry throughout Visual selection, pending operators and
-command/search input, even if those modes are omitted from `render_modes`.
+retains normal-mode geometry for pending operators and command/search input,
+even if those modes are omitted from `render_modes`.
 Anti-conceal still sees the actual mode/selection. Filetype overrides that omit
 `c` (for example LazyAgent's `{ 'n', 't' }`) otherwise clear decorations and
 restore raw conceal/linebreak options until command/search exit. That transition

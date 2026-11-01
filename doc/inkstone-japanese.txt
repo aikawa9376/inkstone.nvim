@@ -33,9 +33,12 @@ always remain. With join=false, inline whitespace guides native wrapping while
 source rows stay visible. Use gj/gk, g0/g$, character selection and yank normally;
 g0yg$ yanks a screen row, yy the original logical line. Padding never enters
 registers or saved text. Anti-conceal does not remove native wrap padding.
-With native paragraphs and normal-mode rendering enabled, Visual selection,
-pending operators and command/search input keep the normal view even if
-render_modes omits these modes. Accepting/canceling :, / or ? does not clear
+Visual follows render_modes. Ordinary defaults omit v, V and CTRL-V, so entering
+Visual temporarily shows raw Markdown and source wrapping; Normal restores the
+rendered view. Explicit Visual entries or render_modes=true keep decorations.
+Native paragraphs with normal-mode rendering preserve the normal view during
+pending operators and command/search input even if render_modes omits those
+modes. Accepting/canceling :, / or ? does not clear
 decorations or reset conceal/wrap options. Anti-conceal still uses the actual
 selection range.
 Inkstone temporarily disables linebreak for this layout and restores the

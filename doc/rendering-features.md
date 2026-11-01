@@ -31,11 +31,20 @@ screen row; `yy` still yanks the entire logical source line. Virtual whitespace
 never enters registers or saved text. Block selection retains Neovim's native
 semantics over logical buffer rows.
 
-Native padding stays in place through anti-conceal; inline Markdown decorations
-still obey anti-conceal independently. When native paragraphs and normal-mode
-rendering are enabled, Visual, operator-pending and command-line modes retain
-the normal rendered view even if `render_modes` omits them. Selection, operators,
-`:`, `/` and `?` keep their starting geometry, including accept/cancel. In
+Native padding stays in place through anti-conceal while rendering is active;
+inline Markdown decorations still obey anti-conceal independently. Visual modes
+follow `render_modes`. With the ordinary default `{ 'n', 'c', 't' }`, entering
+`v`, `V` or block Visual temporarily removes decorations and wrap padding,
+restores source window options, and shows the original Markdown. Returning to
+Normal restores the rendered layout. Selection and yank use the raw source's
+native screen rows while Visual is active, which can differ from BudouX rows.
+Explicitly include `v`, `V`, `\22`, or use `render_modes=true` to keep rendering
+in those modes. The inherited nofile/preview defaults are `true`; filetype
+overrides can restrict them.
+
+Native paragraphs preserve normal rendering in operator-pending and command-line
+modes even if `render_modes` omits them. Operators, `:`, `/` and `?` keep their
+starting geometry, including accept/cancel. In
 particular, an override such as `render_modes = { 'n', 't' }` does not temporarily
 remove decorations and reset conceal/wrap options during command/search input.
 Anti-conceal still uses the actual selection range. Widths follow source characters, including
