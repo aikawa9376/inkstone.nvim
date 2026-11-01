@@ -269,15 +269,20 @@ Stock tmux works with `set -g allow-passthrough on`. Inkstone reads the pane
 offset and top status-bar height and uses standard passthrough; it does not
 patch tmux or change its options. Cursor-only redraws leave unaffected overlays
 in place. Placement ownership is tracked per displayed line:
-command input and non-overlapping floating terminals (including fzf) do not
+command input and floating terminals on unrelated screen rows do not
 erase other headings. Floating windows and popup menus take precedence only
 where they overlap. Background layout is retained while a different scratch
 buffer is edited.
 Inactive buffers use normal-mode rendering; scratch-local Insert mode and
 decoration refreshes do not remove background row reservations. Covered glyphs
 stay hidden until the popup moves or closes. At the end of each Neovim redraw,
-visible sized text is replayed once after the native grid flush without first
-blanking it. Native
+visible sized text is replayed once after the native grid flush. A float sharing
+the lower row of a large glyph can require clearing that glyph before native
+drawing and restoring it afterward, even when the float is horizontally beside
+it. Otherwise normal blanks can skip the glyph and shift a later border under
+[Kitty's multicell overwrite rules](https://sw.kovidgoyal.net/kitty/text-sizing-protocol/#wrapping-and-overwriting-behavior).
+This preserves the reserved layout and restores uncovered glyphs. Ordinary
+unchanged replays do not pre-clear glyphs. Native
 output can erase multicells while writing identical spaces, so equal cell
 contents or missing source-row callbacks cannot safely skip repair. Idle
 H1/H2/H3 text is not resent. Layout/content changes clear obsolete

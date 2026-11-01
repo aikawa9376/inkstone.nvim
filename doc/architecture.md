@@ -219,6 +219,19 @@ remains intact. `tests/softwrap.lua` covers the buffer/window-option contract;
 `test_decorated_scratch_keeps_background_typography_geometry` checks actual
 Kitty multicells, the complete decorated popup rectangle, unchanged source
 height and restored heading coordinates across editing and decoration changes.
+The redraw provider distinguishes occlusion from lower-multicell write hazards.
+Before native drawing, `erase_redraw_hazards` also removes glyphs whose lower
+rows share a screen row with another float, even when their horizontal bounds
+do not overlap. Ordinary writes into Kitty multicell lower rows skip the glyph;
+native leading blanks and a later popup border can therefore share one output
+run and shift the border horizontally. Bounds-only occlusion cannot prevent
+this. The normal post-redraw paint restores uncovered glyphs; it still suppresses
+only actually covered placements. The reservations and window geometry remain
+unchanged. `test_popup_border_beside_decorated_multicell_lower_row_does_not_shift`
+reproduces the six-cell drift with a Japanese fractional heading, a changed
+blank in its lower reservation and a scratch border on that row. It compares
+the entire popup grid at synchronized frame boundaries and checks restored
+heading text after each decoration update.
 ATX titles expose a direct `inline` child; Setext titles expose it through a
 `paragraph`. Both use the configured size for their heading level. Multiline
 Setext content is styled per source row and reserves scaled virtual rows for

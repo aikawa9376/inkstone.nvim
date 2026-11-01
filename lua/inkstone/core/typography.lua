@@ -477,6 +477,23 @@ local function erase_covered(covers)
     erase_matches(function(rect) return covered(rect, covers) end)
 end
 
+local function erase_redraw_hazards(covers)
+    erase_matches(function(rect)
+        if covered(rect, covers) then return true end
+        -- Kitty skips the lower rows of a multicell when ordinary text is
+        -- written there. A compositor update can write leading blanks before
+        -- a float, then its border, in one run. Erase those multicells before
+        -- that run even when the float is horizontally beside the glyph.
+        -- Paint restores uncovered glyphs after the native frame as usual.
+        for _, cover in ipairs(covers) do
+            if cover.win ~= rect.win and rect.height > 1
+                and rect.screen_row + 1 < cover.row + cover.height
+                and rect.screen_row + rect.height > cover.row then return true end
+        end
+        return false
+    end)
+end
+
 local function window_geometry(win, info, top)
     return { top or info.topline - 1, vim.api.nvim_win_get_position(win),
         vim.api.nvim_win_get_width(win), vim.api.nvim_win_get_height(win), info.textoff }
@@ -646,7 +663,7 @@ local function start()
                     or vim.api.nvim_win_get_buf(rect.win) ~= rect.buf
                     or vim.api.nvim_win_get_tabpage(rect.win) ~= vim.api.nvim_get_current_tabpage()
             end)
-            erase_covered(blockers())
+            erase_redraw_hazards(blockers())
         end,
         on_win = function(_, win, buf, top)
             local state = M.active[buf]

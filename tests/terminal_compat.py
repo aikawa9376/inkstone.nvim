@@ -673,6 +673,61 @@ class TerminalTests(unittest.TestCase):
         self.assertEqual(restored, original)
         self.assert_source()
 
+    def test_popup_border_beside_decorated_multicell_lower_row_does_not_shift(self):
+        self.tmux('set-option', '-g', 'allow-passthrough', 'on')
+        self.render(['BEFORE', '', '## 要件', '', 'body', '', 'AFTER'])
+        self.lua("vim.env.KITTY_WINDOW_ID='1'; _G.source=vim.api.nvim_get_current_buf(); "
+                 "require('inkstone.api').render({buf=_G.source}); vim.wait(200)")
+        self.pump(.3)
+        self.lua("local r=require('inkstone.core.typography').drawn[1]; assert(r); "
+                 "_G.scratch=vim.api.nvim_create_buf(false,true); "
+                 "_G.popup=vim.api.nvim_open_win(_G.scratch,true,{relative='editor',row=r.screen_row,col=25,"
+                 "width=45,height=6,style='minimal',border='single',title=' lazyagent '}); "
+                 "vim.api.nvim_buf_set_lines(_G.scratch,0,-1,false,{'SCRATCH'}); "
+                 "_G.pad_ns=require('inkstone.core.ui').ns; "
+                 "for _,m in ipairs(vim.api.nvim_buf_get_extmarks(_G.source,_G.pad_ns,0,-1,{details=true})) do "
+                 "if m[4].virt_lines then _G.pad={id=m[1],row=m[2],col=m[3]} end end; assert(_G.pad)")
+        self.pump(.3)
+        expected = json.loads(self.lua("local c=vim.api.nvim_win_get_config(_G.popup); "
+                 "local p=vim.api.nvim_win_get_position(_G.popup); local lines={}; "
+                 "for row=p[1]+1,p[1]+c.height+2 do local cells={}; "
+                 "for col=p[2]+1,p[2]+c.width+2 do cells[#cells+1]=vim.fn.screenstring(row,col) end; "
+                 "lines[#lines+1]=cells end; print(vim.json.encode({row=p[1],col=p[2],cells=lines}))"))
+        failures, frames = [], []
+
+        def check_popup():
+            for row, line in enumerate(expected['cells'], expected['row']):
+                cells = self.screen.cpu_cells(row)
+                for col, text in enumerate(line, expected['col']):
+                    actual = cells[col]['text'] or ' '
+                    if actual != (text or ' '):
+                        failures.append((row, col, text, actual))
+
+        def observe():
+            frames.append(True)
+            check_popup()
+
+        self.frame_observer = observe
+        for i in range(5):
+            # A changed blank in the glyph's lower reservation and the popup
+            # border can be emitted in one native row run. Kitty skips lower
+            # multicells during ordinary writes, shifting the later border
+            # despite the popup being horizontally outside the glyph bounds.
+            self.lua("vim.api.nvim_set_hl(0,'TailDirty',{bg=" + str(0x112233 + i * 0x010101) + "}); "
+                     "local p=_G.pad; vim.api.nvim_buf_set_extmark(_G.source,_G.pad_ns,p.row,p.col,"
+                     "{id=p.id,virt_lines={{{' ','TailDirty'}}}}); "
+                     "vim.api.nvim_set_hl(0,'FloatBorder',{fg=" + str(0xABCDEF - i * 0x010101) + "}); vim.cmd('redraw')")
+            self.pump(.2)
+            check_popup()
+            self.assertIn('要件', self.scaled_text())
+        self.frame_observer = None
+        self.assertTrue(frames, 'no synchronized terminal frames were sampled')
+        self.assertEqual(failures[:10], [], 'popup rows shifted after a lower multicell overwrite')
+        self.lua("vim.api.nvim_win_close(_G.popup,true); require('inkstone.api').render({buf=_G.source}); "
+                 "vim.wait(100); vim.cmd('redraw!')")
+        self.pump(.2)
+        self.assert_source()
+
     def test_fzf_filter_keeps_unrelated_heading_intact(self):
         if not shutil.which('fzf'):
             self.skipTest('fzf is not installed')
