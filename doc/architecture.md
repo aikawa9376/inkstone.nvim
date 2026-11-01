@@ -230,13 +230,13 @@ rows share a screen row with another float, even when their horizontal bounds
 do not overlap. Ordinary writes into Kitty multicell lower rows skip the glyph;
 native leading blanks and a later popup border can therefore share one output
 run and shift the border horizontally. Bounds-only occlusion cannot prevent
-this. The normal post-redraw paint restores uncovered glyphs; it still suppresses
+this. The redraw-end paint restores uncovered glyphs; it still suppresses
 only actually covered placements. The reservations and window geometry remain
 unchanged. `test_popup_border_beside_decorated_multicell_lower_row_does_not_shift`
 reproduces the six-cell drift with a Japanese fractional heading, a changed
 blank in its lower reservation and a scratch border on that row. It compares
-the entire popup grid at synchronized frame boundaries and checks restored
-heading text after each decoration update.
+the entire popup grid and heading presence at synchronized frame boundaries,
+as well as restored heading text after each decoration update.
 ATX titles expose a direct `inline` child; Setext titles expose it through a
 `paragraph`. Both use the configured size for their heading level. Multiline
 Setext content is styled per source row and reserves scaled virtual rows for
@@ -298,15 +298,24 @@ placement ownership independently, so a redraw in one place does not erase
 every heading. Clearing an unrelated buffer is
 a no-op for placements. Changed geometry/content/entry sets erase only owned
 extents before native redraw. Command-line height changes preserve still-visible
-lines when their origin and width are unchanged. Floats and popup menus erase
-only intersecting lines before they draw, never the rest of the page.
+lines when their origin and width are unchanged. Pre-draw erases target actually
+occluded lines and lower-row float hazards while retaining unrelated placements.
 Floating window positions are zero-based outer corners; convert them to the
 one-based screen coordinates used by placements before testing intersections.
 Their bounds include only nonempty border sides returned by the window config.
 Otherwise a popup's bottom/right border can be repainted by enlarged glyphs,
 while borderless floats can incorrectly suppress adjacent headings.
-Every completed Neovim redraw schedules one coalesced replay of visible,
-uncovered placements after the native grid flush. Native output can overwrite
+Every Neovim redraw replays visible, uncovered placements in the provider's
+`on_end`, then schedules one coalesced repair after the native grid flush.
+For tmux, the in-frame replay first sends a native (unwrapped) `CSI ? 2026 l`.
+This flushes the pane's collected native rows before the OSC 66 passthrough;
+tmux's own terminal synchronized update then commits both together. Sending
+passthrough first lets later native rows erase the glyph or recreate the
+multicell cursor skip. No tmux options or terminal sync nesting are used.
+Full TUI invalidations can still print cells after the provider callback, so
+the scheduled repair remains necessary, especially outside tmux. This is not
+a universal atomic-rendering API or a guarantee about every GPU frame.
+Native output can overwrite
 multicells with identical blank cells, including composed/virtual rows without
 an owned source-row callback. Equal screenstring/screenattr snapshots therefore
 cannot prove the terminal overlay survived. Production painting keeps neither
@@ -326,7 +335,18 @@ are forgotten without sending glyph erases into the destination view. An
 unfocused pane can later become hidden without another FocusLost, so
 `background_visible` validates visibility before background paint/erase output;
 it also guards configurations without focus notifications. Focused panes with
-focus notifications use the cached fast path. Queued geometry callbacks wait for
+focus notifications use the cached fast path. A redraw checks visibility once
+before its pre-erases and reuses that result within the provider callbacks.
+The bounded subprocess poll pumps only libuv: `SystemObj:wait()` calls
+`vim.wait()`, which flushes the native UI even with `fast_only=true`. Such a
+flush inside a provider commits the cleared heading before its replacement;
+even a check in `on_start` can prematurely flush changed default colors.
+Timeouts still fail closed and terminate the query process.
+A queued paint can also see a newly created float before its first native
+redraw. Covered old placements stay tracked until the provider's pre-erase;
+dropping them early loses the multicells that must be removed before the popup
+draws. Late paint never clears over the popup itself.
+Queued geometry callbacks wait for
 a fresh snapshot if focus changes during an in-flight query. Hidden recovery
 timers stop, and FocusGained restores visible placements without changing tmux
 options. Without focus notifications, the next native redraw restores them.

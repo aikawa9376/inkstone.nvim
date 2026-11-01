@@ -285,7 +285,11 @@ buffer is edited.
 Inactive buffers use normal-mode rendering; scratch-local Insert mode and
 decoration refreshes do not remove background row reservations. Covered glyphs
 stay hidden until the popup moves or closes. At the end of each Neovim redraw,
-visible sized text is replayed once after the native grid flush. A float sharing
+visible sized text is replayed before the terminal frame commits, with an
+additional coalesced repair after the native flush. Under tmux, native row
+output is flushed before the text passthrough so the frame includes both.
+Visibility checks do not flush a partially assembled Neovim frame.
+A float sharing
 the lower row of a large glyph can require clearing that glyph before native
 drawing and restoring it afterward, even when the float is horizontally beside
 it. Otherwise normal blanks can skip the glyph and shift a later border under
@@ -319,8 +323,8 @@ window suppression flag are preserved. In typography windows the delayed body
 highlight uses a window-scoped row decoration, avoiding native cursorline option
 redraws that can briefly expose unscaled text. Native behavior returns after
 leaving typography. `cursorlineopt=screenline` keeps native wrap semantics.
-Unchanged native screen cells also prevent a delayed highlight elsewhere from
-replaying every heading. Switching buffers/tabs or closing a window retires its
+Equal native screen cells do not establish that the terminal text survived;
+completed redraws still repair their visible headings. Switching buffers/tabs or closing a window retires its
 old overlay before the new view draws, so enlarged glyphs do not remain over it.
 
 `demo/rich.md` includes a table, image, scaled headings and small text for trying

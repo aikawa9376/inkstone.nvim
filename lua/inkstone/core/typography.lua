@@ -1,11 +1,13 @@
 -- Kitty OSC 66 text is outside Neovim's grid. Reserve its cells, erase it
--- before native redraws and replay it after the grid flush. Never change tmux.
+-- before native redraws, replay within the frame and repair after its flush.
+-- Never change tmux options.
 local M = { active = {}, drawn = {}, tmux = nil, pending = false, windows = {} }
 local ns = vim.api.nvim_create_namespace('inkstone.typography')
 local probe_timeout = 1200
 local cursorline_windows = {}
 local cursorline_extmark_windows = {}
 local sync_recovery
+local redrawing = false
 local function kitty()
     return vim.env.KITTY_WINDOW_ID ~= nil or vim.env.TERM_PROGRAM == 'kitty'
 end
@@ -22,7 +24,21 @@ local function background_visible()
     local args = { 'tmux', 'display-message', '-p' }
     if vim.env.TMUX_PANE then vim.list_extend(args, { '-t', vim.env.TMUX_PANE }) end
     args[#args + 1] = '#{window_active},#{window_zoomed_flag},#{pane_active}'
-    local result = vim.system(args, { text = true, timeout = 100 }):wait()
+    -- SystemObj:wait() calls vim.wait(), which flushes the native UI even
+    -- with fast_only=true. Poll only libuv here: visibility checks must not
+    -- commit a partially assembled frame (including changed default colors).
+    local result
+    local process = vim.system(args, { text = true, timeout = 100 }, function(value) result = value end)
+    local deadline = vim.uv.hrtime() + 100 * 1e6
+    repeat
+        vim.uv.run('nowait')
+        if not result then vim.uv.sleep(1) end
+    until result or vim.uv.hrtime() >= deadline
+    if not result then
+        -- Exit/pipe-close callbacks can straddle the deadline.
+        pcall(process.kill, process, 9)
+        result = { code = 124 }
+    end
     local window, zoom, pane = (result.stdout or ''):match('^(%d),(%d),(%d)')
     local visible = result.code == 0 and window == '1' and (zoom ~= '1' or pane == '1')
     if M.tmux then M.tmux.visible = visible end
@@ -35,13 +51,18 @@ local function background_visible()
 end
 
 local function needs_visibility_check()
-    return vim.env.TMUX and (M.focused == false or (M.tmux and M.tmux.focus_events == false))
+    return not redrawing and vim.env.TMUX and (M.focused == false or (M.tmux and M.tmux.focus_events == false))
 end
 
-local function send(data)
+local function send(data, flush_tmux)
     if needs_visibility_check() and not M.painting and not background_visible() then return end
     if M.suspended or (M.tmux and M.tmux.visible == false) then return end
-    if data ~= '' and vim.api.nvim_ui_send then vim.api.nvim_ui_send(M.wrap(data)) end
+    if data ~= '' and vim.api.nvim_ui_send then
+        -- End tmux's pane sync before passthrough so its collected native
+        -- rows precede the overlay, within tmux's terminal frame. This
+        -- changes no tmux options and does not nest terminal sync modes.
+        vim.api.nvim_ui_send((flush_tmux and vim.env.TMUX and '\27[?2026l' or '') .. M.wrap(data))
+    end
 end
 
 local function refresh_waiters()
@@ -484,7 +505,7 @@ local function erase_redraw_hazards(covers)
         -- written there. A compositor update can write leading blanks before
         -- a float, then its border, in one run. Erase those multicells before
         -- that run even when the float is horizontally beside the glyph.
-        -- Paint restores uncovered glyphs after the native frame as usual.
+        -- The end callback restores uncovered glyphs in the native frame.
         for _, cover in ipairs(covers) do
             if cover.win ~= rect.win and rect.height > 1
                 and rect.screen_row + 1 < cover.row + cover.height
@@ -499,12 +520,12 @@ local function window_geometry(win, info, top)
         vim.api.nvim_win_get_width(win), vim.api.nvim_win_get_height(win), info.textoff }
 end
 
-function M.paint(force)
+function M.paint(force, flush_tmux)
     if needs_visibility_check() and not M.painting and not background_visible() then return end
     if M.painting or M.suspended or not M.tmux or not M.tmux.allowed
         or M.tmux.visible == false or M.capability ~= true then return end
     M.painting = true
-    local out, regions, wanted, previous, covers = {}, {}, {}, {}, blockers()
+    local out, regions, retained, wanted, previous, covers = {}, {}, {}, {}, {}, blockers()
     for _, rect in ipairs(M.drawn) do previous[rect.key] = rect end
     for buf, state in pairs(M.active) do
         if vim.api.nvim_buf_is_valid(buf) and vim.api.nvim_buf_get_changedtick(buf) == state.tick
@@ -559,9 +580,13 @@ function M.paint(force)
     for _, rect in ipairs(M.drawn) do
         local next_rect = wanted[rect.key]
         if not next_rect or next_rect.payload ~= rect.payload or next_rect.width ~= rect.width then
-            -- Covered rectangles were already erased before the covering UI
-            -- drew. Never clear over a popup after its native redraw.
-            if not covered(rect, covers) then
+            -- A queued paint can see a new float before on_start has erased
+            -- its covered glyphs. Keep their ownership until that pre-draw
+            -- erase; forgetting them here leaves lower-row multicells under
+            -- the popup. Never erase over a popup from a late paint.
+            if covered(rect, covers) then
+                retained[#retained + 1] = rect
+            else
                 out[#out + 1] = ('\27[%d;%dH\27[%dX'):format(rect.row, rect.col, rect.width)
             end
         end
@@ -574,8 +599,10 @@ function M.paint(force)
             out[#out + 1] = rect.payload
         end
     end
-    M.drawn = regions
-    if #out > 0 then send('\27' .. '7' .. table.concat(out) .. '\27[0m\27' .. '8') end
+    M.drawn = vim.list_extend(regions, retained)
+    if #out > 0 then
+        send('\27' .. '7' .. table.concat(out) .. '\27[0m\27' .. '8', flush_tmux)
+    end
     M.painting = false
 end
 
@@ -656,6 +683,9 @@ local function start()
     if M.timer then return end
     vim.api.nvim_set_decoration_provider(ns, {
         on_start = function()
+            if not next(M.active) and #M.drawn == 0 then return false end
+            if needs_visibility_check() then background_visible() end
+            redrawing = true
             -- Retired placements must leave before the new window's native
             -- text is drawn; erasing them in a scheduled paint is too late.
             erase_matches(function(rect)
@@ -688,8 +718,18 @@ local function start()
         end,
         -- TUI/compositor output can overwrite multicells even when no owned
         -- source row received on_line, or when its blank cells stayed equal.
-        -- Repair after every completed redraw, coalesced into one callback.
-        on_end = function() M.schedule(true) end,
+        -- Replay before the TUI's frame ends. Scheduled paint alone exposes a
+        -- blank frame; passthrough without the pane-sync barrier can precede
+        -- tmux's delayed native rows and recreate the lower-row cursor skip.
+        on_end = function()
+            if not redrawing then return end
+            local ok, err = pcall(M.paint, true, true)
+            redrawing = false
+            if not ok then error(err) end
+            -- Full TUI invalidations (for example default color changes)
+            -- can still emit cells after on_end. Retain a coalesced repair.
+            M.schedule(true)
+        end,
     })
     M.timer = vim.uv.new_timer()
 end

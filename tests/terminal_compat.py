@@ -733,7 +733,7 @@ class TerminalTests(unittest.TestCase):
                         failures.append((row, col, text, actual))
 
         def observe():
-            frames.append(True)
+            frames.append('要件' in self.scaled_text())
             check_popup()
 
         self.frame_observer = observe
@@ -751,6 +751,7 @@ class TerminalTests(unittest.TestCase):
             self.assertIn('要件', self.scaled_text())
         self.frame_observer = None
         self.assertTrue(frames, 'no synchronized terminal frames were sampled')
+        self.assertTrue(all(frames), 'heading disappeared at a terminal frame boundary')
         self.assertEqual(failures[:10], [], 'popup rows shifted after a lower multicell overwrite')
         self.lua("vim.api.nvim_win_close(_G.popup,true); require('inkstone.api').render({buf=_G.source}); "
                  "vim.wait(100); vim.cmd('redraw!')")
@@ -994,6 +995,39 @@ class TerminalTests(unittest.TestCase):
         self.assertTrue(all(not missing for missing in frames), frames)
         self.assertEqual(self.lua('print(_G.native_toggles)'), '0')
         self.assertEqual(self.lua('print(vim.wo.cursorline)'), 'false')
+        self.assert_source()
+
+    def test_native_redraw_frames_keep_all_heading_sizes(self):
+        self.tmux('set-option', '-g', 'allow-passthrough', 'on')
+        self.render(['BEFORE', '', '# FIRST', '', '## SECOND', '', '### THIRD', '', 'BODY'])
+        self.lua("vim.env.KITTY_WINDOW_ID='1'; vim.api.nvim_win_set_cursor(0,{9,0}); "
+                 "require('inkstone.api').render({buf=vim.api.nvim_get_current_buf()}); vim.wait(200)")
+        self.pump(.2)
+        labels, frames = ('FIRST', 'SECOND', 'THIRD'), []
+
+        def observe():
+            text = self.scaled_text()
+            frames.append([label for label in labels if label not in text])
+
+        self.frame_observer = observe
+        for i in range(5):
+            for enabled in ('true', 'false'):
+                self.lua("vim.api.nvim_set_hl(0,'CursorLine',{bg=" + str(0x223344 + i) + "}); "
+                         "vim.wo.cursorline=" + enabled + "; vim.cmd('redraw')")
+                self.pump(.08)
+                for label in labels:
+                    self.assertIn(label, self.scaled_text())
+        # Default-color invalidations and full-screen clears also need their
+        # final repair; identical native reservations are insufficient.
+        for command in ("vim.api.nvim_set_hl(0,'Normal',{fg=0xe2e2e2,bg=0x111111}); vim.cmd('redraw')",
+                        "vim.cmd('mode')", "vim.cmd('redraw!')"):
+            self.lua(command)
+            self.pump(.15)
+            for label in labels:
+                self.assertIn(label, self.scaled_text())
+        self.frame_observer = None
+        self.assertTrue(frames, 'no synchronized terminal frames were sampled')
+        self.assertTrue(all(not missing for missing in frames), frames)
         self.assert_source()
 
     def test_shared_buffer_split_uses_native_text_and_recovers_after_close(self):
