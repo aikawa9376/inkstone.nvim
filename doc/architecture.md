@@ -596,6 +596,39 @@ terminal overlay, not a replacement Neovim TUI, and brief fallback/flicker durin
 unrelated redraws is possible. `doc/rendering-features.md` owns configuration,
 eligibility and user-facing limits; `demo/rich.md` is the interactive sample.
 
+## Experimental image typography
+
+The opt-in `typography.backend='image'` reuses heading collection, scaled
+wrapping, source restoration and shared-buffer fallback. `core/typography_image.lua`
+owns per-buffer heading slots and refcounted content assets. The Rust helper in
+`native/` reads bounded JSON and returns PNG pixels using Pango/Cairo; it has no
+terminal output or source-file access. At most two conversion jobs run at once.
+Text/styles, font, raster cell dimensions, command and executable metadata key
+the disk cache. Obsolete slots cancel unshared work; late completions cannot
+upload or trigger a render after their owner is disposed. Errors retain the
+normal heading renderer, and PNG publication uses private temporary files.
+
+`lib/graphics.lua` is independent of Snacks and heading layout. It uploads PNGs
+as quiet Kitty graphics virtual placements and encodes full image IDs plus
+row/column indices into ordinary placeholder cells. Ready headings emit those
+cells in their inline and virtual-line extmarks. Normal redraw, scrolling,
+popup occlusion and tmux window switching move/clip the same cells. No OSC 66
+provider, idle repair, or image retransmission participates in their redraw.
+Per-image highlight IDs are restored if a colorscheme cleared them. Release
+deletes only exact owned image IDs; hidden uploads cannot place pixels on the
+destination pane because prototypes have no physical screen location.
+
+Image generation/display is optional and the default remains `backend='text'`.
+The capability gate conservatively retains Kitty 0.40+ and existing passthrough
+permission checks. Inline small spans keep ordinary rendering in this backend.
+Raster cell proportions are configurable; theme/style changes need a render.
+Image pixels do not expose terminal text selection or per-character search
+highlights. `native/README.md` owns setup, protocol limits and the isolated
+`demo/image-typography.lua` preview. `tests/image_typography.lua` checks pending/
+failed native fallback, cache reuse, cleanup and cancelled jobs. Image tests in
+`tests/terminal_compat.py` decode actual PNGs and resolve Kitty render layers at
+synchronized frame boundaries; these do not prove every GPU/compositor frame.
+
 ## LaTeX source ranges and converters
 
 The built-in LaTeX handler converts formula source to Unicode using `utftex`

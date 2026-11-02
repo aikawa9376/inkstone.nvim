@@ -71,6 +71,8 @@ fold の三角マークは左側に置き、行数は既定で `▶ summary文�
 
 Snacks の Kitty 画像表示を使う場合、表内の画像はセル幅に合わせて縮小し、高さに合わせて罫線も伸ばします。GIF・動画は変換可能な静止プレビューとして扱います。[表内画像の条件](doc/rendering-features.md#images-inside-tables) も参照してください。
 
+実験用の `typography.backend = 'image'` は、見出しを Rust（Pango/Cairo）で画像化し、Neovim の装飾として配置します。見出し画像は Snacks を必要とせず、再描画時の拡大文字の上書きを避けます。ビルド方法と独立したプレビューは [native/README.md](native/README.md) を参照してください。既定は従来の文字サイズ表示です。
+
 - Lua: `require('inkstone').setup(opts)`
 - ハイライト: `InkstoneH1`、`InkstoneCode`、`InkstoneTableHead` など。
 - ベースの設定一覧: [doc/upstream-configuration.md](doc/upstream-configuration.md)

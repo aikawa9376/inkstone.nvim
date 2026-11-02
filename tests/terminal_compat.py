@@ -1292,6 +1292,154 @@ class TerminalTests(unittest.TestCase):
         self.assertTrue(all(not missing for missing in frames), frames)
         self.assert_source()
 
+    def image_typography(self, lines, anti_conceal=False):
+        binary = Path(os.environ.get('INKSTONE_RASTER', ROOT / 'native/target/release/inkstone-raster'))
+        if not binary.is_file():
+            self.skipTest('run make raster to build the Rust image typography helper')
+        self.tmux('set-option', '-g', 'allow-passthrough', 'on')
+        self.tmux('set-option', '-g', 'focus-events', 'on')
+        self.render(lines, anti_conceal=anti_conceal, conceallevel=3)
+        self.lua("vim.env.KITTY_WINDOW_ID='1'; local b=vim.api.nvim_get_current_buf(); "
+                 "local c=require('inkstone.state').get(b); c.typography.backend='image'; "
+                 'c.typography.image.command={' + json.dumps(str(binary)) + '}; '
+                 'c.typography.image.cache_dir=' + json.dumps(str(self.root / 'raster')) + '; '
+                 "require('inkstone.core.typography').clear(b); require('inkstone.api').render({buf=b}); "
+                 "assert(vim.wait(4000,function() local ctx=require('inkstone.request.context').get(b); "
+                 "for _,e in ipairs(ctx.typography) do if e.image then return true end end end,10),"
+                 "'image typography not ready: '..vim.inspect(require('inkstone.core.typography_image').assets)); vim.wait(100)")
+        self.pump(.2)
+
+    def image_layers(self):
+        # Kitty normally resolves placeholder cells just before GPU rendering.
+        self.screen.update_only_line_graphics_data()
+        return self.screen.grman.update_layers(0, -1., 1., 2. / self.screen.columns,
+                                              2. / self.screen.lines, self.screen.columns,
+                                              self.screen.lines, 16, 32)
+
+    def test_image_typography_uses_native_placeholders_without_replay(self):
+        self.image_typography(['BEFORE', '', '# 日本語 FIRST', '', '## SECOND', '', '### THIRD', '', 'BODY'])
+        self.assertEqual(self.screen.grman.image_count, 3)
+        self.assertIn('\U0010eeee', self.visible_text())
+        self.assertIn('BODY', self.visible_text())
+        self.assertEqual(self.lua("print(package.loaded['snacks'] == nil)"), 'true')
+        expected = {layer['image_id'] for layer in self.image_layers()}
+        self.assertEqual(len(expected), 3, 'uploaded images must have actual on-screen render layers')
+        frames = []
+        self.frame_observer = lambda: frames.append({layer['image_id'] for layer in self.image_layers()})
+        self.output.clear()
+        for command in ("vim.cmd('redraw!')", "vim.api.nvim_win_set_cursor(0,{3,0}); vim.wo.cursorline=true; vim.cmd('redraw')",
+                        "vim.api.nvim_set_hl(0,'Normal',{fg=0xe2e2e2,bg=0x111111}); vim.cmd('redraw!')"):
+            self.lua(command)
+            self.pump(.05)
+            self.assertEqual(self.screen.grman.image_count, 3)
+            self.assertIn('\U0010eeee', self.visible_text())
+        for _ in range(3):
+            for event in (b'\x1b[O', b'\x1b[I'):
+                os.write(self.fd, event)
+                self.pump(.04)
+        self.frame_observer = None
+        self.assertTrue(frames, 'no synchronized image frames sampled')
+        self.assertTrue(all(expected <= frame for frame in frames), frames)
+        self.assertNotIn(b'\x1b_G', self.output, 'native redraws must not retransmit images')
+        self.assertNotIn(b'\x1b]66;', self.output, 'image typography must not use OSC 66 repair')
+        self.assert_source()
+
+    def test_image_typography_restores_source_and_releases_owned_images(self):
+        self.image_typography(['BEFORE', '', '# FIRST', '', '## SECOND', '', 'BODY'])
+        self.assertEqual(len({layer['image_id'] for layer in self.image_layers()}), 2)
+        self.lua("local c=require('inkstone.state').get(vim.api.nvim_get_current_buf()); c.anti_conceal.enabled=true; "
+                 "vim.api.nvim_win_set_cursor(0,{3,0}); require('inkstone.api').render({buf=vim.api.nvim_get_current_buf()})")
+        self.pump(.1)
+        self.assertIn('# FIRST', self.visible_text())
+        self.assertEqual(len({layer['image_id'] for layer in self.image_layers()}), 1)
+        self.lua("vim.api.nvim_win_set_cursor(0,{7,0}); require('inkstone.api').render({buf=vim.api.nvim_get_current_buf()})")
+        self.pump(.1)
+        self.assertEqual(len({layer['image_id'] for layer in self.image_layers()}), 2)
+        self.lua("require('inkstone.api').typography()")
+        self.pump(.1)
+        self.assertEqual(self.screen.grman.image_count, 0)
+        self.assertEqual(len(self.image_layers()), 0)
+        self.assertIn('FIRST', self.visible_text())
+        self.assert_source()
+
+    def test_image_typography_survives_tmux_window_switch_without_replay(self):
+        self.image_typography(['BEFORE', '', '# FIRST', '', '## SECOND', '', 'BODY'])
+        self.tmux('set-option', '-g', 'allow-passthrough', 'all')
+        expected = {layer['image_id'] for layer in self.image_layers()}
+        source = self.tmux('display-message', '-p', '#{window_id}')
+        other = self.tmux('new-window', '-d', '-P', '-F', '#{window_id}', 'sh', '-c',
+                          "printf 'PLAIN BEFORE\\n\\nPLAIN AFTER\\n'; sleep 60")
+        self.output.clear()
+        self.tmux('select-window', '-t', other)
+        self.pump(.15)
+        self.lua("vim.cmd('redraw!')")
+        self.pump(.1)
+        self.assertEqual(len(self.image_layers()), 0)
+        self.assertIn('PLAIN AFTER', self.visible_text())
+        self.tmux('select-window', '-t', source)
+        self.pump(.2)
+        self.assertEqual({layer['image_id'] for layer in self.image_layers()}, expected)
+        self.assertNotIn(b'\x1b_G', self.output)
+        self.assert_source()
+
+    def test_image_typography_tracks_scroll_floats_resize_and_shared_views(self):
+        lines = ['prefix ' + str(i) for i in range(12)] + ['# FIRST', '', '## SECOND', '']
+        lines += ['tail ' + str(i) for i in range(60)]
+        self.image_typography(lines)
+        self.lua("require('inkstone.core.manager').init(); require('inkstone.core.manager').attach(vim.api.nvim_get_current_buf())")
+        expected = {layer['image_id'] for layer in self.image_layers()}
+        self.assertEqual(len(expected), 2)
+        frames = []
+        self.frame_observer = lambda: frames.append({layer['image_id'] for layer in self.image_layers()})
+        self.output.clear()
+        for _ in range(4):
+            for key in ('3<C-e>', '3<C-y>'):
+                self.lua('vim.api.nvim_input(' + json.dumps(key) + ')')
+                self.pump(.05)
+        self.frame_observer = None
+        self.assertTrue(frames)
+        self.assertTrue(all(expected <= frame for frame in frames), frames)
+        self.assertNotIn(b'\x1b_G', self.output)
+        self.lua("_G.cover=vim.api.nvim_open_win(vim.api.nvim_create_buf(false,true),false,"
+                 "{relative='editor',row=11,col=0,width=35,height=6,style='minimal',border='single'}); "
+                 "vim.api.nvim_buf_set_lines(vim.api.nvim_win_get_buf(_G.cover),0,-1,false,{'POPUP'}); vim.cmd('redraw')")
+        self.pump(.1)
+        self.assertEqual(len(self.image_layers()), 0, 'popup cells must clip the heading images')
+        self.assertIn('POPUP', self.visible_text())
+        self.lua("vim.api.nvim_win_close(_G.cover,true); vim.cmd('redraw')")
+        self.pump(.1)
+        self.assertEqual({layer['image_id'] for layer in self.image_layers()}, expected)
+        fcntl.ioctl(self.fd, termios.TIOCSWINSZ, struct.pack('HHHH', 24, 72, 0, 0))
+        self.screen.resize(24, 72)
+        os.kill(self.pid, signal.SIGWINCH)
+        self.pump(.2)
+        self.assertEqual(len({layer['image_id'] for layer in self.image_layers()}), 2)
+        self.lua("_G.owner=vim.api.nvim_get_current_win(); vim.cmd('vsplit'); _G.sibling=vim.api.nvim_get_current_win(); vim.wait(150)")
+        self.pump(.15)
+        self.assertEqual(len(self.image_layers()), 0)
+        self.assertEqual(self.visible_text().count('FIRST'), 2)
+        self.lua("vim.api.nvim_win_close(_G.sibling,true); vim.wait(150)")
+        self.pump(.2)
+        self.assertEqual(len({layer['image_id'] for layer in self.image_layers()}), 2)
+        self.assert_source()
+
+    def test_image_typography_isolated_preview(self):
+        if not (ROOT / 'native/target/release/inkstone-raster').is_file():
+            self.skipTest('run make raster to build the isolated preview')
+        self.tmux('set-option', '-g', 'allow-passthrough', 'on')
+        self.lua('vim.env.INKSTONE_IMAGE_CACHE=' + json.dumps(str(self.root / 'preview-cache')) + '; '
+                 'dofile(' + json.dumps(str(ROOT / 'demo/image-typography.lua')) + '); '
+                 "assert(vim.wait(4000,function() local ctx=require('inkstone.request.context').cache[vim.api.nvim_get_current_buf()]; if not ctx then return false end; "
+                 "for _,e in ipairs(ctx.typography) do if e.image then return true end end end,10)); vim.wait(100)")
+        self.pump(.2)
+        self.assertTrue(self.image_layers(), 'preview must render actual heading images')
+        self.assertIn('Snacks', self.visible_text())
+        self.assertEqual(self.lua("print(vim.fn.exists(':Inkstone'))"), '2')
+        self.assertEqual(self.lua("print(package.loaded['snacks']==nil)"), 'true')
+        self.lua("require('inkstone.api').typography()")
+        self.pump(.1)
+        self.assertEqual(self.screen.grman.image_count, 0)
+
     def test_native_redraw_frames_keep_all_heading_sizes(self):
         self.tmux('set-option', '-g', 'allow-passthrough', 'on')
         self.render(['BEFORE', '', '# FIRST', '', '## SECOND', '', '### THIRD', '', 'BODY'])

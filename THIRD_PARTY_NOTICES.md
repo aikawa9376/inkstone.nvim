@@ -45,3 +45,17 @@ pane offsets and source restoration in the existing rendering pipeline.
 Its details header/body presentation and code-language alias/highlight handling
 were consulted when auditing details rendering. Inkstone implements these in
 its own native Tree-sitter, source extmark and folding pipeline.
+
+## Kitty graphics protocol
+
+Specification: https://sw.kovidgoyal.net/kitty/graphics-protocol/
+Index mapping: https://github.com/kovidgoyal/kitty/blob/master/gen/rowcolumn-diacritics.txt
+
+`lua/inkstone/lib/image_diacritics.lua` records the protocol's fixed Unicode
+row/column index mapping (indices 0–255). `lib/graphics.lua` independently
+implements PNG transfer and Unicode placeholder encoding from the public
+specification. No Kitty implementation code or executable is bundled.
+
+The optional Rust helper uses gtk-rs Pango/Cairo bindings and serde/serde_json;
+their versions are pinned in `native/Cargo.lock` and retain their upstream
+licenses. Their source code is fetched by Cargo at build time, not vendored.
