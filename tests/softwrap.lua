@@ -158,7 +158,7 @@ return function(test, equal)
         ]=])
         equal(result.title, 'Styled Title')
         assert(result.body)
-        assert(result.open:find('Styled Title', 1, true) and result.open:find('▼', 1, true))
+        assert(result.open:find('Styled', 1, true) and result.open:find('▼', 1, true))
         for _, state in ipairs({ result.open, result.closed, result.reopened }) do
             assert(not state:find('<details', 1, true) and not state:find('<summary', 1, true) and not state:find('</summary', 1, true))
         end
@@ -282,14 +282,19 @@ return function(test, equal)
                         local line
                         for _, row in ipairs(rows) do if row:find(title, 1, true) then line = row; break end end
                         assert(line, 'missing fold title: ' .. title .. ' ' .. vim.inspect({ position, width, state, rows }))
-                        local icon = assert(line:find(state == 'closed' and '▶' or '▼', 1, true), line)
-                        local info = assert(line:find('%d+ lines'), line)
-                        local label = assert(line:find(title, 1, true))
-                        assert(icon < label, 'fold triangle must remain on the left: ' .. line)
-                        if position == 'right' then
-                            assert(info > label, 'right fold information covered its title: ' .. line)
-                            assert(vim.fn.strdisplaywidth(line) == width, 'fold information did not reach the right edge: ' .. line)
-                        elseif title ~= 'Note' then assert(info < label, 'left fold information lost its prefix: ' .. line) end
+                        if title == 'lua' and state == 'open' then
+                            assert(not line:find('▼', 1, true) and not line:find('lines', 1, true),
+                                'expanded code must retain its ordinary language label: ' .. line)
+                        else
+                            local icon = assert(line:find(state == 'closed' and '▶' or '▼', 1, true), line)
+                            local info = assert(line:find('%d+ lines'), line)
+                            local label = assert(line:find(title, 1, true))
+                            assert(icon < label, 'fold triangle must remain on the left: ' .. line)
+                            if position == 'right' then
+                                assert(info > label, 'right fold information covered its title: ' .. line)
+                                assert(vim.fn.strdisplaywidth(line) == width - 3, 'fold information did not reserve scrollbar space: ' .. line)
+                            elseif title ~= 'Note' then assert(info < label, 'left fold information lost its prefix: ' .. line) end
+                        end
                     end
                 end
             end

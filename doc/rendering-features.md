@@ -422,19 +422,25 @@ the code; use the details title to fold the enclosing details. Reopening a
 parent preserves the children's states. `folds.position = 'right'` is the
 default: the triangle (`▶` closed / `▼` open) always stays on the left with
 the title or language name, while `N lines` is aligned to the window's right
-edge. Counts remain visible in both states for details, code and callouts.
+edge. Details and callouts retain counts in both states. Code shows fold
+information only while collapsed; expanded code keeps its original language
+header without a triangle, count or additional header padding.
 N counts source rows after the opening row, including summary/blank lines and
 the closing tag. Long titles are clipped
 to leave space for the information; alignment follows window resizing and gutters.
+`folds.right_pad = 3` leaves three cells after right-aligned counts so floating
+scrollbars at the window edge do not cover their last letters. Increase this for
+a wider overlay, or use `0` to align counts flush with an unobstructed edge.
+Triangle glyphs use `InkstoneFoldIcon`, derived from the theme's `Comment` color
+with italic disabled in both GUI and terminal styles; theme changes refresh it.
 
 Set `folds.position = 'left'` for the compact `▶ N lines · title` /
 `▶ N lines · language` prefix (using `▼` when expanded). Callout counts follow
 their displayed title. This setting controls counts rather than triangle position;
 `code.position` independently controls ordinary expanded code-language labels.
 Collapsed code summaries stay visible at the cursor and cannot be covered by
-the usual code-language overlay or padding. Expanded code reserves header space
-for the triangle and count, including right-positioned language labels, and
-retains its decorated control at the cursor. Visual/raw modes continue
+the usual code-language overlay or padding. Reopening code retains its ordinary
+decorated language header at the cursor. Visual/raw modes continue
 to follow `render_modes`.
 Anti-conceal margins
 around the visible fold anchor do not reopen a collapsed body; deliberate

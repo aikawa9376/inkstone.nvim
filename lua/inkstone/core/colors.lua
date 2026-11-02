@@ -75,6 +75,8 @@ M.cache.combine = {}
 M.cache.bg_as_fg = {}
 ---@type table<string, { hl: string, bold: boolean, attrs: table }>
 M.cache.bold = {}
+---@type vim.api.keyset.set_hl?
+M.cache.fold_icon = nil
 
 ---called from plugin directory
 function M.init()
@@ -107,6 +109,22 @@ function M.reload()
     for _, color in pairs(M.cache.bold) do
         M.with_bold(color.hl, color.bold, true)
     end
+    if M.cache.fold_icon then M.fold_icon(true) end
+end
+
+-- Fold symbols use the theme's comment color without its italic font style.
+---@param force? boolean
+---@return string
+function M.fold_icon(force)
+    local name = M.prefix .. 'FoldIcon'
+    local attrs = M.get_hl('Comment')
+    attrs.italic = false
+    if attrs.cterm then attrs.cterm.italic = false end
+    if force or not vim.deep_equal(M.cache.fold_icon, attrs) then
+        vim.api.nvim_set_hl(0, name, attrs)
+        M.cache.fold_icon = attrs
+    end
+    return name
 end
 
 ---Derive a style without changing the user's source highlight or other buffers.

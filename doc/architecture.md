@@ -200,20 +200,27 @@ Their dedicated overlay summary replaces renderer-owned marks on the opening
 fence (retaining any container prefix), so language overlays and code padding
 cannot cover the collapse indicator. It remains visible at the cursor during
 rendering; raw/Visual mode still follows the normal render-mode policy.
-The triangle always stays on the left (`▶` closed / `▼` expanded), with the title
-or language label. `folds.position` defaults to `right`: a separate `right_align`
-extmark shows `N lines` in both states. Metadata and callout triangles use
+Triangles stay left (`▶` closed / `▼` expanded) on details and callouts, and on
+collapsed code. `folds.position` defaults to `right`: a separate `right_align`
+extmark shows `N lines`; details/callouts retain it when expanded. Expanded code
+receives no fold glyph, count or additional header padding. Metadata and callout triangles use
 priority 5001, above Neovim's default 4096 virtual-text priority; a lower priority
 would let full-width language borders or quote markers cover the controls.
-Titles and code-language header widths reserve space for both the triangle and
-count, preserving native right alignment through resizing and gutters.
+Collapsed titles reserve space for the triangle and count, preserving native
+right alignment through resizing and gutters. `folds.right_pad` defaults to
+three cells appended to right-aligned chunks: floating scrollbar windows are
+composited above all extmarks and can cover the last letters regardless of
+metadata priority. This is distinct from renderer-overlay priority conflicts.
+`core/colors.lua:fold_icon` derives `InkstoneFoldIcon` from resolved Comment
+attributes with GUI/cterm italic disabled, refreshing it on ColorScheme or a
+changed source definition without altering the shared Comment group.
 `position=left` uses `▶/▼ N lines · title/language`; callout counts follow their
 displayed overlay title, with the window column computed from rendered widths
 to avoid overwriting the title at concealed-source EOL. N counts source rows
 after the opening row, including summary/blank lines and closing tags.
-Expanded code keeps its interactive header under anti-conceal, even before any
-explicit toggle. Fences with no language/border header receive a fallback `Code`
-control. `code.position` independently positions the original expanded language
+Explicitly reopened code retains its ordinary opening-row renderer marks under
+anti-conceal at the cursor. Untoggled code follows normal anti-conceal policy.
+`code.position` independently positions the original expanded language
 label. The inherited renderer snapshots disable folds; actual controls, open and
 closed counts, and both positions are covered by the UI and terminal suites.
 Details controls overlay the original tag row and pad to its display width, so

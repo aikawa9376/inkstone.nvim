@@ -155,6 +155,7 @@ function M.apply(context, parser, marks)
     local hidden, extra = {}, {}
     local anchors, code_anchors, open_code = {}, {}, {}
     local str = require('inkstone.lib.str')
+    local icon_hl = require('inkstone.core.colors').fold_icon()
     local function add(row, opts, col)
         extra[#extra + 1] = { conceal = true, modes = config.render_modes, start_row = row, start_col = col or 0,
             fold_hidden = opts.conceal_lines ~= nil, opts = opts }
@@ -172,6 +173,7 @@ function M.apply(context, parser, marks)
     end
     local function fold_info(block, closed)
         local value = count(block)
+        if config.position == 'right' then value = value .. string.rep(' ', math.max(0, math.floor(config.right_pad or 3))) end
         local opts = { virt_text_pos = config.position == 'right' and 'right_align' or 'eol',
             virt_text = { { config.position == 'right' and value or ' · ' .. value, 'Comment' } },
             -- Renderer virtual text uses Neovim's default priority (4096).
@@ -219,11 +221,11 @@ function M.apply(context, parser, marks)
                 local first = vim.api.nvim_buf_get_lines(context.buf, block.start_row, block.start_row + 1, false)[1] or ''
                 local icon = closed and '▶ ' or '▼ '
                 local label = {
-                    { icon .. count(block), 'Comment' },
+                    { icon, icon_hl }, { count(block), 'Comment' },
                     { ' · ' .. block.title, 'InkstoneDetailsHeader' },
                 }
                 if config.position == 'right' then
-                    label = { { icon, 'Comment' }, { title(block.title, fold_info(block, closed) + str.width(icon)), 'InkstoneDetailsHeader' } }
+                    label = { { icon, icon_hl }, { title(block.title, fold_info(block, closed) + str.width(icon)), 'InkstoneDetailsHeader' } }
                 end
                 local width = str.line_width(label)
                 local padding = math.max(0, vim.fn.strdisplaywidth(first) - width)
@@ -256,12 +258,12 @@ function M.apply(context, parser, marks)
                 local first = vim.api.nvim_buf_get_lines(context.buf, block.start_row, block.start_row + 1, false)[1] or ''
                 local info = first:match('[`~]+(.*)$') or ''
                 local language = info:match('^%s*(%S+)')
-                local label = { { ('▶ %d lines'):format(block.end_row - block.start_row - 1), 'Comment' } }
+                local label = { { '▶ ', icon_hl }, { count(block), 'Comment' } }
                 if language then label[#label + 1] = { ' · ' .. language, context.config.code.highlight_fallback } end
                 code_anchors[block.start_row] = block.start_col or 0
                 if config.position == 'right' then
                     local prefix = str.width(first:sub(1, block.start_col or 0))
-                    label = { { '▶ ', 'Comment' },
+                    label = { { '▶ ', icon_hl },
                         { title(language or 'Code', fold_info(block, true) + 2, prefix), context.config.code.highlight_fallback } }
                 end
                 local padding = math.max(0, str.width(first:sub((block.start_col or 0) + 1)) - str.line_width(label))
@@ -273,14 +275,11 @@ function M.apply(context, parser, marks)
                 extra[#extra].conceal = false
                 extra[#extra].folded = true
             elseif block.kind == 'code' then
-                anchors[block.start_row] = true
-                open_code[block.start_row] = { col = block.start_col or 0,
-                    prefix = config.position == 'right' and '▼ ' or '▼ ' .. count(block) .. ' · ' }
-                if config.position == 'right' then fold_info(block, false) end
+                if entry(context.buf, block) then open_code[block.start_row] = block.start_col or 0 end
             elseif block.kind == 'callout' then
                 fold_info(block, closed)
                 add(block.start_row, { virt_text_pos = 'overlay', priority = 5001,
-                    virt_text = { { closed and '▶' or '▼', 'Comment' } } }, block.start_col)
+                    virt_text = { { closed and '▶' or '▼', icon_hl } } }, block.start_col)
                 extra[#extra].conceal = false
             end
         end
@@ -296,26 +295,12 @@ function M.apply(context, parser, marks)
         local code_col = code_anchors[mark.start_row]
         if not inside and not (anchors[mark.start_row] and mark.opts.conceal_lines)
             and not (code_col and mark.start_col >= code_col) then
-            local open = open_code[mark.start_row]
-            if open and mark.start_col >= open.col then
-                if (mark.conceal == 'code_language' or mark.conceal == 'code_border') and mark.opts.virt_text then
-                    mark.opts.virt_text = vim.list_extend({ { open.prefix, 'Comment' } }, mark.opts.virt_text)
-                    open.rendered = true
-                end
-                -- Keep the interactive header visible on its cursor line.
+            local open_col = open_code[mark.start_row]
+            if open_col and mark.start_col >= open_col then
+                -- Reopening code keeps its original language header decorated.
                 mark.conceal = false
             end
             result[#result + 1] = mark
-        end
-    end
-    for row, open in pairs(open_code) do
-        if not open.rendered then
-            local first = vim.api.nvim_buf_get_lines(context.buf, row, row + 1, false)[1] or ''
-            local label = open.prefix .. 'Code'
-            label = label .. string.rep(' ', math.max(0, str.width(first:sub(open.col + 1)) - str.width(label)))
-            add(row, { virt_text_pos = 'overlay', priority = 150,
-                virt_text = { { label, context.config.code.highlight_fallback } } }, open.col)
-            extra[#extra].conceal = false
         end
     end
     vim.list_extend(result, extra)
