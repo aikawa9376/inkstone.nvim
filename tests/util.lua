@@ -22,6 +22,9 @@ function M.setup.init(opts)
     ---@type render.md.UserConfig
     local test_config = {
         anti_conceal = { enabled = false },
+        -- Inherited snapshots cover the base renderer. Inkstone's fold
+        -- controls are exercised with actual input in tests/softwrap.lua.
+        folds = { enabled = false },
         win_options = { concealcursor = { rendered = 'nvic' } },
         overrides = {
             buftype = {

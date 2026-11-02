@@ -420,19 +420,21 @@ is outside the supported block layout.
 Code fences have independent fold state inside details. `Ctrl+i` on code folds
 the code; use the details title to fold the enclosing details. Reopening a
 parent preserves the children's states. `folds.position = 'right'` is the
-default: details titles and code language names stay on the left, while
-`▶ N lines` is aligned to the window's right edge. Expanded details show `▼`
-at the right edge. Callout counts use the same position. N counts hidden source
-rows, including summary/blank lines and the closing tag. Long titles are clipped
+default: the triangle (`▶` closed / `▼` open) always stays on the left with
+the title or language name, while `N lines` is aligned to the window's right
+edge. Counts remain visible in both states for details, code and callouts.
+N counts source rows after the opening row, including summary/blank lines and
+the closing tag. Long titles are clipped
 to leave space for the information; alignment follows window resizing and gutters.
 
 Set `folds.position = 'left'` for the compact `▶ N lines · title` /
-`▶ N lines · language` prefix and `▼ title` expanded details header. Callout
-counts then follow their title. This setting controls fold information;
+`▶ N lines · language` prefix (using `▼` when expanded). Callout counts follow
+their displayed title. This setting controls counts rather than triangle position;
 `code.position` independently controls ordinary expanded code-language labels.
 Collapsed code summaries stay visible at the cursor and cannot be covered by
-the usual code-language overlay or padding. Explicitly reopening code retains
-its decorated header at the cursor after the action. Visual/raw modes continue
+the usual code-language overlay or padding. Expanded code reserves header space
+for the triangle and count, including right-positioned language labels, and
+retains its decorated control at the cursor. Visual/raw modes continue
 to follow `render_modes`.
 Anti-conceal margins
 around the visible fold anchor do not reopen a collapsed body; deliberate
@@ -442,6 +444,10 @@ Visible ranges skip currently hidden fold rows. Opening or closing a long fold
 automatically decorates the newly visible content, including code after a closed
 fold, without requiring a cursor move or scroll. Hidden code bodies stay outside
 the render viewport.
+
+After updating the plugin, restart Neovim to load the new modules.
+Updating files alone does not replace already loaded Lua modules. An older
+running instance may lack `folds.position` even when its checkout is current.
 
 Attached buffers, including ordinary Markdown buffers and the side preview,
 automatically have Normal-mode, buffer-local `j/k`, `gj/gk` and Up/Down mappings

@@ -200,17 +200,22 @@ Their dedicated overlay summary replaces renderer-owned marks on the opening
 fence (retaining any container prefix), so language overlays and code padding
 cannot cover the collapse indicator. It remains visible at the cursor during
 rendering; raw/Visual mode still follows the normal render-mode policy.
-`folds.position` defaults to `right`: title/language remains on the left and a
-separate `right_align` extmark shows `▶ N lines` (or `▼` for expanded details)
-at priority 160. Titles are clipped by display width to reserve this space;
-the title overlay has priority 150. Native right alignment follows resizing and
-gutters. `position=left` retains `▶ N lines · title/language` and `▼ title`;
-callouts use the right edge or inline trailing count respectively. N counts
-hidden source rows, including summary/blank lines and the closing tag.
-Explicitly reopened code keeps its opening-row renderer marks under anti-conceal
-while rendered, because the toggle places the cursor on that control. Ordinary
-untoggled code retains normal cursor-line anti-conceal behavior. This policy is
-independent of the expanded code label's `code.position`.
+The triangle always stays on the left (`▶` closed / `▼` expanded), with the title
+or language label. `folds.position` defaults to `right`: a separate `right_align`
+extmark shows `N lines` in both states. Metadata and callout triangles use
+priority 5001, above Neovim's default 4096 virtual-text priority; a lower priority
+would let full-width language borders or quote markers cover the controls.
+Titles and code-language header widths reserve space for both the triangle and
+count, preserving native right alignment through resizing and gutters.
+`position=left` uses `▶/▼ N lines · title/language`; callout counts follow their
+displayed overlay title, with the window column computed from rendered widths
+to avoid overwriting the title at concealed-source EOL. N counts source rows
+after the opening row, including summary/blank lines and closing tags.
+Expanded code keeps its interactive header under anti-conceal, even before any
+explicit toggle. Fences with no language/border header receive a fallback `Code`
+control. `code.position` independently positions the original expanded language
+label. The inherited renderer snapshots disable folds; actual controls, open and
+closed counts, and both positions are covered by the UI and terminal suites.
 Details controls overlay the original tag row and pad to its display width, so
 native cursor-line conceal rules cannot expose trailing HTML. Multiline summary
 rows and the closing tag are hidden, with blank overlays for cursor restoration.

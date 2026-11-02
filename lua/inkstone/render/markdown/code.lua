@@ -181,6 +181,16 @@ function Render:language(delim)
     local suffix = 0
     -- space within block after accounting for white space and padding
     local width = self.data.body - delim.start_col
+    local folds = self.context.config.folds
+    if folds.enabled and folds.code then
+        local rows = self.node.end_row + (self.node.end_col > 0 and 1 or 0) - self.node.start_row - 1
+        local count = ('%d lines'):format(rows)
+        local leading = folds.position == 'right' and 2 or str.width('▼ ' .. count .. ' · ')
+        local trailing = folds.position == 'right' and str.width(count) + 1 or 0
+        width = math.min(width, math.max(0, self.context:window_width() - delim.start_col
+            - self.data.margin - self:indent():size() - leading - trailing))
+        body = body:sub(1, math.max(0, width - prefix - padding))
+    end
     local extra = width - prefix - body:width() - suffix - padding ---@type integer
     if self.config.position == 'left' then
         prefix = prefix + padding

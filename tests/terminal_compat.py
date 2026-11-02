@@ -351,6 +351,8 @@ class TerminalTests(unittest.TestCase):
             self.assertNotIn('</details', text)
             header_row = next(row for row in range(24) if 'Box' in str(self.screen.line(row)))
             header = str(self.screen.line(header_row))
+            self.assertTrue(header.startswith('▼ Box'), header)
+            self.assertTrue(header.rstrip().endswith('6 lines'), header)
             self.assertEqual(self.screen.line(header_row).cursor_from(header.index('Box')).fg, (0xffcc00 << 8) | 2)
             body_row = next(row for row in range(24) if 'BODY' in str(self.screen.line(row)))
             body = str(self.screen.line(body_row))
@@ -369,11 +371,45 @@ class TerminalTests(unittest.TestCase):
         check()
         self.lua('require("inkstone.api").toggle_view(); vim.wait(200); vim.cmd("redraw!")')
         self.pump(.2)
-        self.assertIn('▶ 6 lines', self.visible_text())
+        self.assertIn('6 lines', self.visible_text())
         self.assertNotIn('local answer', self.visible_text())
         self.lua('require("inkstone.api").toggle_view(); vim.wait(200); vim.cmd("redraw!")')
         self.pump(.2)
         check()
+
+    def test_fold_triangles_stay_left_and_counts_survive_right_code_labels(self):
+        for width in (120, 54):
+            if width != 120:
+                fcntl.ioctl(self.fd, termios.TIOCSWINSZ, struct.pack('HHHH', 24, width, 0, 0))
+                self.screen.resize(24, width)
+                os.kill(self.pid, signal.SIGWINCH)
+                self.pump()
+            self.render(['BEFORE', '', '```lua', 'local message = "' + 'long' * 45 + '"', '```', '',
+                         '> [!NOTE]- Note', '> callout body', '', 'AFTER'], wrap=True, conceallevel=3)
+            self.lua('local c=require("inkstone.state").get(vim.api.nvim_get_current_buf()).code; '
+                     'c.position="right"; c.width="block"; c.min_width=40; c.left_pad=1; c.right_pad=1; c.language_pad=1; '
+                     'require("inkstone.api").render({buf=vim.api.nvim_get_current_buf()}); vim.wait(200); vim.cmd("redraw!")')
+            self.pump(.2)
+
+            def header(title, icon, count):
+                line = next(str(self.screen.line(row)).rstrip() for row in range(24)
+                            if title in str(self.screen.line(row)))
+                self.assertLess(line.index(icon), line.index(title), line)
+                self.assertTrue(line.endswith(str(count) + ' lines'), line)
+                self.assertEqual(len(line), width, line)
+                self.assert_source()
+
+            header('lua', '▼', 2)
+            header('Note', '▶', 1)
+            self.lua('vim.api.nvim_win_set_cursor(0,{3,0}); require("inkstone.api").toggle_fold(); '
+                     'vim.wait(200); vim.cmd("redraw!")')
+            self.pump(.2)
+            header('lua', '▶', 2)
+            self.lua('require("inkstone.api").toggle_fold(); vim.api.nvim_win_set_cursor(0,{7,0}); '
+                     'require("inkstone.api").toggle_fold(); vim.wait(200); vim.cmd("redraw!")')
+            self.pump(.2)
+            header('lua', '▼', 2)
+            header('Note', '▼', 1)
 
     def test_details_callout_and_code_folds(self):
         self.render(['BEFORE', '', '<details>', '<summary>Details title</summary>', '', 'Secret detail body', '', '</details>', '',

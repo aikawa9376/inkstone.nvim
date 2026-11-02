@@ -81,11 +81,11 @@ Blank lines between details and summary tags are supported. Toggling from a
 hidden child opens its collapsed parent first.
 Code folds inside details are independent and keep their state across parent
 close/reopen. Ctrl+i on code toggles code; use the details title for the parent.
-Fold information defaults to folds.position='right': title/language on the left,
-"▶ N lines" at the right edge (expanded details show "▼"). N counts hidden rows.
-Use folds.position='left' for "▶ N lines · title/language" and "▼ title".
+Fold triangles always stay left (▶ closed / ▼ open), beside title/language.
+folds.position='right' puts "N lines" at the right edge in both states.
+Use folds.position='left' for "▶/▼ N lines · title/language".
 Callout counts use the same position; code.position controls ordinary code labels.
-Explicitly reopened code keeps its header decorated at the cursor. Newly visible
+Expanded code keeps its control decorated at the cursor. Newly visible
 code after a long closed fold renders without a scroll; hidden bodies stay out
 of the render viewport.
 Anti-conceal margins around the anchor do not reopen collapsed bodies.

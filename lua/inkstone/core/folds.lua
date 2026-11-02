@@ -81,7 +81,7 @@ function M.blocks(buf, parser, config, view)
                     local first = vim.api.nvim_buf_get_lines(buf, sr, sr + 1, false)[1] or ''
                     local suffix = first:match('^%s*>%s*%[![%w_-]+%]([+-]?)')
                     if suffix then
-                        blocks[#blocks + 1] = { kind = kind, start_row = sr, end_row = finish, closed = suffix == '-' }
+                        blocks[#blocks + 1] = { kind = kind, start_row = sr, start_col = sc, end_row = finish, closed = suffix == '-' }
                     end
                 end
             end
@@ -167,10 +167,32 @@ function M.apply(context, parser, marks)
         add(row, opts)
         extra[#extra].conceal = false
     end
+    local function count(block)
+        return ('%d lines'):format(block.end_row - block.start_row - 1)
+    end
     local function fold_info(block, closed)
-        local value = closed and ('▶ %d lines'):format(block.end_row - block.start_row - 1) or '▼'
-        add(block.start_row, { virt_text_pos = 'right_align', virt_text = { { value, 'Comment' } },
-            priority = 160, hl_mode = 'combine' })
+        local value = count(block)
+        local opts = { virt_text_pos = config.position == 'right' and 'right_align' or 'eol',
+            virt_text = { { config.position == 'right' and value or ' · ' .. value, 'Comment' } },
+            -- Renderer virtual text uses Neovim's default priority (4096).
+            -- Controls must remain above language borders and quote markers.
+            priority = 5001, hl_mode = 'combine' }
+        if config.position == 'left' then
+            -- A callout title overlay can extend beyond the concealed source
+            -- EOL. Place its count after the displayed title, not over it.
+            local first = vim.api.nvim_buf_get_lines(context.buf, block.start_row, block.start_row + 1, false)[1] or ''
+            local function width(col)
+                return context:width({ start_row = block.start_row, start_col = 0, end_col = col, text = first:sub(1, col) })
+            end
+            local column = width(#first)
+            for _, mark in ipairs(marks) do
+                if mark.start_row == block.start_row and mark.opts.virt_text_pos == 'overlay' then
+                    column = math.max(column, width(mark.start_col) + str.line_width(mark.opts.virt_text))
+                end
+            end
+            opts.virt_text_win_col = column
+        end
+        add(block.start_row, opts)
         extra[#extra].conceal = false
         extra[#extra].folded = closed
         return str.width(value)
@@ -195,12 +217,13 @@ function M.apply(context, parser, marks)
             end
             if block.kind == 'details' then
                 local first = vim.api.nvim_buf_get_lines(context.buf, block.start_row, block.start_row + 1, false)[1] or ''
-                local label = closed and {
-                    { ('▶ %d lines'):format(block.end_row - block.start_row - 1), 'Comment' },
+                local icon = closed and '▶ ' or '▼ '
+                local label = {
+                    { icon .. count(block), 'Comment' },
                     { ' · ' .. block.title, 'InkstoneDetailsHeader' },
-                } or { { '▼ ' .. block.title, 'InkstoneDetailsHeader' } }
+                }
                 if config.position == 'right' then
-                    label = { { title(block.title, fold_info(block, closed)), 'InkstoneDetailsHeader' } }
+                    label = { { icon, 'Comment' }, { title(block.title, fold_info(block, closed) + str.width(icon)), 'InkstoneDetailsHeader' } }
                 end
                 local width = str.line_width(label)
                 local padding = math.max(0, vim.fn.strdisplaywidth(first) - width)
@@ -238,7 +261,8 @@ function M.apply(context, parser, marks)
                 code_anchors[block.start_row] = block.start_col or 0
                 if config.position == 'right' then
                     local prefix = str.width(first:sub(1, block.start_col or 0))
-                    label = { { title(language or 'Code', fold_info(block, true), prefix), context.config.code.highlight_fallback } }
+                    label = { { '▶ ', 'Comment' },
+                        { title(language or 'Code', fold_info(block, true) + 2, prefix), context.config.code.highlight_fallback } }
                 end
                 local padding = math.max(0, str.width(first:sub((block.start_col or 0) + 1)) - str.line_width(label))
                 if padding > 0 then label[#label + 1] = { string.rep(' ', padding), context.config.code.highlight } end
@@ -248,17 +272,16 @@ function M.apply(context, parser, marks)
                 -- the cursor while Normal-mode rendering remains active.
                 extra[#extra].conceal = false
                 extra[#extra].folded = true
-            elseif closed then
-                if config.position == 'right' then fold_info(block, true)
-                else
-                    add(block.start_row, { virt_text_pos = 'eol', virt_text = {
-                        { (' ▶ %d lines'):format(block.end_row - block.start_row - 1), 'Comment' },
-                    } })
-                    extra[#extra].folded = true
-                end
-            end
-            if block.kind == 'code' and not closed and entry(context.buf, block) then
-                open_code[block.start_row] = block.start_col or 0
+            elseif block.kind == 'code' then
+                anchors[block.start_row] = true
+                open_code[block.start_row] = { col = block.start_col or 0,
+                    prefix = config.position == 'right' and '▼ ' or '▼ ' .. count(block) .. ' · ' }
+                if config.position == 'right' then fold_info(block, false) end
+            elseif block.kind == 'callout' then
+                fold_info(block, closed)
+                add(block.start_row, { virt_text_pos = 'overlay', priority = 5001,
+                    virt_text = { { closed and '▶' or '▼', 'Comment' } } }, block.start_col)
+                extra[#extra].conceal = false
             end
         end
     end
@@ -273,13 +296,26 @@ function M.apply(context, parser, marks)
         local code_col = code_anchors[mark.start_row]
         if not inside and not (anchors[mark.start_row] and mark.opts.conceal_lines)
             and not (code_col and mark.start_col >= code_col) then
-            local open_col = open_code[mark.start_row]
-            if open_col and mark.start_col >= open_col then
-                -- Opening a fold leaves the cursor on its control. Retain
-                -- that header just as we retain a collapsed fold summary.
+            local open = open_code[mark.start_row]
+            if open and mark.start_col >= open.col then
+                if (mark.conceal == 'code_language' or mark.conceal == 'code_border') and mark.opts.virt_text then
+                    mark.opts.virt_text = vim.list_extend({ { open.prefix, 'Comment' } }, mark.opts.virt_text)
+                    open.rendered = true
+                end
+                -- Keep the interactive header visible on its cursor line.
                 mark.conceal = false
             end
             result[#result + 1] = mark
+        end
+    end
+    for row, open in pairs(open_code) do
+        if not open.rendered then
+            local first = vim.api.nvim_buf_get_lines(context.buf, row, row + 1, false)[1] or ''
+            local label = open.prefix .. 'Code'
+            label = label .. string.rep(' ', math.max(0, str.width(first:sub(open.col + 1)) - str.width(label)))
+            add(row, { virt_text_pos = 'overlay', priority = 150,
+                virt_text = { { label, context.config.code.highlight_fallback } } }, open.col)
+            extra[#extra].conceal = false
         end
     end
     vim.list_extend(result, extra)

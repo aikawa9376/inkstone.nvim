@@ -184,12 +184,12 @@ return function(test, equal)
         ]=])
         assert(result.open:find('UNIQUE_CODE_A', 1, true))
         assert(not result.code_closed:find('UNIQUE_CODE_A', 1, true))
-        assert(result.code_closed:find('▶ 3 lines', 1, true), 'collapsed code must have a visible summary')
+        assert(result.code_closed:find('3 lines', 1, true), 'collapsed code must have a visible summary')
         assert(result.code_closed:find('lua', 1, true))
-        assert(result.parent_closed:find('▶ 11 lines', 1, true) and result.parent_closed:find('Outer', 1, true),
+        assert(result.parent_closed:find('11 lines', 1, true) and result.parent_closed:find('Outer', 1, true),
             'details must show its title and hidden source-row count')
         assert(not result.parent_closed:find('DETAILS_TAIL', 1, true))
-        assert(result.parent_reopened:find('▶ 3 lines', 1, true), 'nested collapsed state must be visibly identifiable')
+        assert(result.parent_reopened:find('3 lines', 1, true), 'nested collapsed state must be visibly identifiable')
         assert(result.parent_reopened:find('DETAILS_TAIL', 1, true))
         assert(result.code_opened:find('UNIQUE_CODE_A', 1, true))
     end)
@@ -268,18 +268,29 @@ return function(test, equal)
                     require('inkstone.api').toggle_fold()
                     assert(vim.wait(2000, function() return not table.concat(rows(18), '\n'):find('local value', 1, true) end, 5))
                     assert(vim.deep_equal(require('inkstone.state').validate(), {}))
-                    return rows(18)
+                    local result = { closed = rows(18) }
+                    for _, row in ipairs({ 1, 6, 10 }) do
+                        vim.api.nvim_win_set_cursor(0, { row, 0 })
+                        require('inkstone.api').toggle_fold()
+                    end
+                    assert(vim.wait(2000, function() return table.concat(rows(18), '\n'):find('local value', 1, true) end, 5))
+                    result.open = rows(18)
+                    return result
                 ]=], position)
-                for _, title in ipairs({ 'Title', 'lua', 'Note' }) do
-                    local line
-                    for _, row in ipairs(result) do if row:find(title, 1, true) then line = row; break end end
-                    assert(line, 'missing fold title: ' .. title)
-                    local info = assert(line:find('▶', 1, true), line)
-                    local label = assert(line:find(title, 1, true))
-                    if position == 'right' then
-                        assert(info > label, 'right fold information covered its title: ' .. line)
-                        assert(vim.fn.strdisplaywidth(line) == width, 'fold information did not reach the right edge: ' .. line)
-                    elseif title ~= 'Note' then assert(info < label, 'left fold information lost its prefix: ' .. line) end
+                for state, rows in pairs(result) do
+                    for _, title in ipairs({ 'Title', 'lua', 'Note' }) do
+                        local line
+                        for _, row in ipairs(rows) do if row:find(title, 1, true) then line = row; break end end
+                        assert(line, 'missing fold title: ' .. title .. ' ' .. vim.inspect({ position, width, state, rows }))
+                        local icon = assert(line:find(state == 'closed' and '▶' or '▼', 1, true), line)
+                        local info = assert(line:find('%d+ lines'), line)
+                        local label = assert(line:find(title, 1, true))
+                        assert(icon < label, 'fold triangle must remain on the left: ' .. line)
+                        if position == 'right' then
+                            assert(info > label, 'right fold information covered its title: ' .. line)
+                            assert(vim.fn.strdisplaywidth(line) == width, 'fold information did not reach the right edge: ' .. line)
+                        elseif title ~= 'Note' then assert(info < label, 'left fold information lost its prefix: ' .. line) end
+                    end
                 end
             end
         end
@@ -355,7 +366,7 @@ return function(test, equal)
             return result
         ]=])
         equal(result.positions, { 811, 3, 811, 3, 4, 6, 809, 809, 7, 4 })
-        assert(table.concat(result.closed, '\n'):find('▶ 807 lines', 1, true))
+        assert(table.concat(result.closed, '\n'):find('807 lines', 1, true))
         assert(table.concat(result.open, '\n'):find('print(1)', 1, true))
         assert(not table.concat(result.open, '\n'):find('<summary>', 1, true))
         assert(result.source and result.foldmethod_unchanged)
@@ -387,7 +398,7 @@ return function(test, equal)
         equal(result[2], 4)
         equal(result[3], { 1, 7 })
         equal(result[4], { 2, 0 })
-        assert(table.concat(result[5], '\n'):find('▶ 2 lines', 1, true))
+        assert(table.concat(result[5], '\n'):find('2 lines', 1, true))
         assert(not table.concat(result[5], '\n'):find('`', 1, true), 'a bare fence must not become a language label')
     end)
 
