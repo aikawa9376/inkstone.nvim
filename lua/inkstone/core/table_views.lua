@@ -58,7 +58,7 @@ function M.cards(context, data)
         if index > 1 then result[#result + 1] = {} end
         for col, header in ipairs(data.headers) do
             local title = header ~= '' and header or ('Column ' .. col)
-            result[#result + 1] = { { '• ' .. title, col == 1 and 'InkstoneH2' or 'InkstoneTableHead' } }
+            result[#result + 1] = { { '• ' .. title, 'InkstoneTableHead' } }
             local units = Parser.units(row.chunks[col] or { { '', context.config.pipe_table.row } })
             local _, minimum = Parser.measure(units)
             for _, line in ipairs(Parser.wrap(units, math.max(width, minimum), context.config.pipe_table.japanese)) do

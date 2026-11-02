@@ -253,7 +253,8 @@ The side preview also maps Enter and `za` to the contextual action.
 encode Ctrl+i as Tab also trigger this mapping with Tab.
 
 List view follows LazyAgent's column-name/value cards, preserving rendered
-inline chunks and Japanese wrapping. Chart view treats numeric columns as
+inline chunks and Japanese wrapping. All column labels use `InkstoneTableHead`,
+including the first column. Chart view treats numeric columns as
 series and the first nonnumeric column as category labels. Decimal, scientific
 notation, correctly grouped thousands, negative/zero values and consistent
 unit suffixes are supported. Empty cells, `-` and `—` are gaps. Series with
