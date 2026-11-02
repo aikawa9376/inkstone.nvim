@@ -15,6 +15,7 @@ local log = require('inkstone.core.log')
 ---@field table_view? render.md.Range
 ---@field typography? render.md.Range
 ---@field font_id? string
+---@field paragraph_concealed? boolean
 
 ---@alias render.md.mark.Conceal boolean|render.md.Element
 

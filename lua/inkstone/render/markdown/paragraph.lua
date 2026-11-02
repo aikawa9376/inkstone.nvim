@@ -81,20 +81,34 @@ function Render:softwrap(margin, indent)
         -- wrapping rather than guessing where their source lands.
         local body = { start_row = row, end_row = row, start_col = 0, end_col = #text, text = text }
         if first < 2 or continuation < 2 or #context.inline:get(body, true) > 0 then return end
-        local input = vim.mpack.encode({ text, first, continuation, self.config.japanese,
-            vim.o.ambiwidth, vim.o.display })
-        local key = 'softwrap:' .. row
-        local breaks = cache.get(context.buf, key, input)
-        if breaks == nil then
-            breaks = softwrap.layout(text, first, continuation, self.config.japanese)
-            cache.put(context.buf, key, input, breaks, #text * 64)
+        local conceals = context.highlights:line(row).native_conceals
+        local projected = context.conceal.level >= 2 and #conceals > 0 and softwrap.conceal_aware()
+        if projected then
+            conceals = vim.tbl_map(function(range)
+                return { range[1], range[2], replacement = context.conceal:replacement(range.replacement) }
+            end, conceals)
         end
-        for _, boundary in ipairs(breaks or {}) do
-            local line = self:line():pad(boundary.padding):extend(repeat_prefix):get()
-            if #line > 0 then
-                self.marks:add(self.config, false, row, boundary.col, {
-                    priority = 100, virt_text = line, virt_text_pos = 'inline', right_gravity = false,
-                })
+        for _, variant in ipairs(projected and { 'source', 'concealed' } or { 'source' }) do
+            local spans = variant == 'concealed' and conceals or nil
+            local input = vim.mpack.encode({ text, first, continuation, self.config.japanese, spans,
+                vim.o.ambiwidth, vim.o.display })
+            local key = 'softwrap:' .. row .. ':' .. variant
+            local breaks = cache.get(context.buf, key, input)
+            if breaks == nil then
+                breaks = softwrap.layout(text, first, continuation, self.config.japanese, spans)
+                cache.put(context.buf, key, input, breaks, #text * 64)
+            end
+            for _, boundary in ipairs(breaks or {}) do
+                local line = self:line():pad(boundary.padding):extend(repeat_prefix):get()
+                if #line > 0 then
+                    self.marks:add(self.config, false, row, boundary.col, {
+                        priority = 100, virt_text = line, virt_text_pos = 'inline', right_gravity = false,
+                    })
+                    if projected then
+                        local marks = self.marks:get()
+                        marks[#marks].paragraph_concealed = variant == 'concealed'
+                    end
+                end
             end
         end
     end

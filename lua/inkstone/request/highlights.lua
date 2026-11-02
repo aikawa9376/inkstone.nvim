@@ -4,11 +4,13 @@ local interval = require('inkstone.lib.interval')
 ---@field hidden boolean
 ---@field conceals render.md.request.highlights.Conceal[]
 ---@field groups render.md.request.highlights.Group[]
+---@field native_conceals render.md.request.highlights.Conceal[]
 
 ---@class render.md.request.highlights.Entry
 ---@field hidden? boolean
 ---@field conceal? render.md.request.highlights.Conceal
 ---@field group? render.md.request.highlights.Group
+---@field native? boolean
 
 ---@class render.md.request.highlights.Conceal: render.md.Range
 ---@field replacement string
@@ -42,7 +44,7 @@ end
 ---@param entry render.md.request.highlights.Entry
 function Highlights:add(row, entry)
     if not self.lines[row] then
-        self.lines[row] = { hidden = false, conceals = {}, groups = {} }
+        self.lines[row] = { hidden = false, conceals = {}, groups = {}, native_conceals = {} }
     end
     local line = self.lines[row]
     if entry.hidden then
@@ -50,6 +52,13 @@ function Highlights:add(row, entry)
     end
     if entry.conceal then
         if interval.valid(entry.conceal, true) then
+            if entry.native then
+                local c = entry.conceal
+                line.native_conceals[#line.native_conceals + 1] = {
+                    c[1], c[2], replacement = c.replacement, blocks = c.blocks,
+                }
+                line.native_dirty = true
+            end
             line.conceals[#line.conceals + 1] = entry.conceal
             line.conceals_dirty = true
         end
@@ -91,11 +100,15 @@ function Highlights:line(row)
     end
     local line = self.lines[row]
     if not line then
-        line = { hidden = false, conceals = {}, groups = {} }
+        line = { hidden = false, conceals = {}, groups = {}, native_conceals = {} }
     end
     if line.conceals_dirty then
         line.conceals = Highlights.coalesce_conceals(line.conceals)
         line.conceals_dirty = nil
+    end
+    if line.native_dirty then
+        line.native_conceals = Highlights.coalesce_conceals(line.native_conceals)
+        line.native_dirty = nil
     end
     if line.groups_dirty then
         table.sort(line.groups, function(a, b)
@@ -194,7 +207,7 @@ function Highlights:tree(language, root)
                 local end_col = row == er and ec or #sources[row]
                 if data.conceal_lines then self:add(row, { hidden = true }) end
                 if data.conceal then
-                    self:add(row, { conceal = { start_col, end_col,
+                    self:add(row, { native = true, conceal = { start_col, end_col,
                         replacement = data.conceal, blocks = 1 } })
                 end
                 self:add(row, { group = { start_col, end_col, priority = priority,

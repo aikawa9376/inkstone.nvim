@@ -20,7 +20,7 @@
 
 同じバッファを複数のウィンドウで表示している場合や、タブ・リンクアイコンなどの追加のinline表示を含む行は、標準の折り返しに戻します。詳しい条件は [段落レイアウト](doc/rendering-features.md#japanese-paragraph-layout) を参照してください。
 
-conceal-aware wrap 対応の Neovim nightly では、隠した文字の幅を反映する標準の折り返しが自動で効きます。表示範囲も対応する Neovim の画面行数 API で計測し、古い API では従来処理に戻します。[対応範囲と制限](doc/limitations.md#conceal-and-native-wrapping-depend-on-the-neovim-build) を参照してください。
+conceal-aware wrap 対応の Neovim nightly では、隠した文字の幅を反映する標準の折り返しが自動で効きます。BudouX も太字やコード装飾の隠れる記号を除いた幅で計算します。表示範囲も対応する Neovim の画面行数 API で計測し、古い API では従来処理に戻します。[対応範囲と制限](doc/limitations.md#conceal-and-native-wrapping-depend-on-the-neovim-build) を参照してください。
 
 ## 必要なもの
 

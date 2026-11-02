@@ -13,7 +13,8 @@ On Neovim builds with conceal-aware wrap, persistent conceal already reflows at
 its displayed width; Inkstone needs no extra setting to use it. Native bounded
 screen-height measurement also drives viewport planning when available, with
 the previous planner retained for older APIs. Japanese BudouX source-boundary
-selection and wrapped table-cell layout remain separate; see
+selection also accounts for native Tree-sitter conceal when that behavior is
+available. Wrapped table-cell layout remains separate; see
 [conceal limitations](limitations.md#conceal-and-native-wrapping-depend-on-the-neovim-build).
 
 ## Japanese paragraph layout
@@ -54,8 +55,11 @@ modes even if `render_modes` omits them. Operators, `:`, `/` and `?` keep their
 starting geometry, including accept/cancel. In
 particular, an override such as `render_modes = { 'n', 't' }` does not temporarily
 remove decorations and reset conceal/wrap options during command/search input.
-Anti-conceal still uses the actual selection range. Widths follow source characters, including
-concealed Markdown delimiters, so concealed rows can appear shorter. English
+Anti-conceal still uses the actual selection range. On conceal-aware Neovim,
+BudouX computes boundaries from the visible Tree-sitter-concealed text and maps
+them back to source byte positions. It keeps both raw and concealed padding so
+cursor reveal selects the right geometry without reparsing. Older builds keep
+source-width boundaries. English
 words and source whitespace are preserved. While this layout is active, Inkstone
 temporarily disables `linebreak` to prevent Neovim making a second wrap decision
 across padding. It restores the previous window value when native layout stops,
@@ -81,10 +85,12 @@ paragraphs use Neovim's ordinary source wrapping. `join` is false by default.
 Paragraphs inside lists and quotes retain their existing layout. Native wrapping
 accounts for number/sign/fold gutters, ordinary `breakindent`, `showbreak`, and
 paragraph margins/indentation. It falls back to ordinary source wrapping for
-shared buffers displayed in multiple windows, `nowrap`, `list`, number columns
+shared buffers displayed in multiple windows, `nowrap`, number columns
 with `cpoptions+=n`, very narrow windows, control characters/tabs, unsupported
 breakindent options, or rows with additional inline virtual text such as link
 icons/code padding. Image anchors and converted math retain their source layout.
+`list=true` is supported for ordinary tab-free paragraphs; native list markers
+remain visible. A split showing a different buffer does not disable BudouX.
 Closing a shared view, resizing or changing wrap options rebuilds the layout.
 This is not full JIS X 4051 conformance.
 

@@ -269,6 +269,34 @@ class TerminalTests(unittest.TestCase):
         self.assertIn('**FIRST_LINE**', self.visible_text())
         self.assert_source()
 
+    def test_budoux_conceal_list_and_different_buffer_split(self):
+        fcntl.ioctl(self.fd, termios.TIOCSWINSZ, struct.pack('HHHH', 24, 24, 0, 0))
+        self.screen.resize(24, 24)
+        os.kill(self.pid, signal.SIGWINCH)
+        self.pump()
+        self.lua("vim.wo.number=false; vim.wo.relativenumber=false; vim.wo.signcolumn='no'; "
+                 "vim.wo.foldcolumn='0'; vim.wo.list=true; "
+                 "vim.opt_local.listchars={tab='»-',trail='-',nbsp='%',eol='$'}")
+        for source in ('今日は**天気が**いいから散歩しましょう。',
+                       '今日は`天気が`いいから散歩しましょう。'):
+            with self.subTest(source=source):
+                self.render(['BEFORE', '', source, '', 'AFTER'])
+                if self.lua("print(require('inkstone.lib.softwrap').conceal_aware())") != 'true':
+                    self.skipTest('Neovim lacks conceal-aware wrapping')
+                for split in (False, True):
+                    if split:
+                        self.lua("_G.budoux_win=vim.api.nvim_get_current_win(); vim.cmd('botright new'); "
+                                 "_G.budoux_other=vim.api.nvim_get_current_win(); vim.api.nvim_set_current_win(_G.budoux_win); "
+                                 "require('inkstone.api').render({buf=vim.api.nvim_get_current_buf()}); vim.wait(150); vim.cmd('redraw!')")
+                        self.pump()
+                    text = self.visible_text()
+                    self.assertIn('今日は天気がいいから', text)
+                    self.assertIn('散歩しましょう。', text)
+                    self.assertNotIn('今日は天気がいいから散', text)
+                    self.assert_source()
+                self.lua('vim.api.nvim_win_close(_G.budoux_other,true)')
+                self.pump()
+
     def test_paragraph_reflow_and_cursor_restore(self):
         self.render(['BEFORE', '', ' 日本語の**段落**を', ' 文節で折り返します。  ', ' English words follow.', '', 'AFTER'], conceallevel=3, anti_conceal=True)
         self.lua("require('inkstone.state').get(vim.api.nvim_get_current_buf()).paragraph.join=true; "

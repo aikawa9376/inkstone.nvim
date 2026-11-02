@@ -735,15 +735,73 @@ return function(test, equal)
             return result
             ]=], wrap)
         end
-        -- This source fills a native row, so it needs no padding. Neovim's
-        -- conceal-aware wrap changes where that native row ends; compare with
-        -- the installed editor's own behavior instead of pinning an old split.
         local expected, actual = decorated(false), decorated(true)
-        equal(actual, expected)
+        if lua("return require('inkstone.lib.softwrap').conceal_aware()") then
+            equal(actual[1], { '今日は天気がいいから', '散歩しましょう。' })
+            equal(actual[3], 1)
+            assert(not vim.deep_equal(actual[1], expected[1]), 'BudouX must change the native character wrap')
+        else
+            equal(actual, expected)
+            equal(actual[3], 0)
+        end
         equal(table.concat(actual[1]), '今日は天気がいいから散歩しましょう。')
         equal(actual[2] .. actual[4], '今日は**天気が**いいから散歩しましょう。')
-        equal(actual[3], 0)
         equal(actual[5], true)
+    end)
+
+    test('BudouX survives list display and a split showing a different buffer', function()
+        equal(lua([=[
+            setup({'今日は天気がいいから散歩しましょう。'})
+            local win = vim.api.nvim_get_current_win()
+            vim.wo.list = true
+            vim.opt_local.listchars = { tab = '»-', trail = '-', nbsp = '%', precedes = '«', extends = '»' }
+            refresh()
+            local result = { rows(2), padding_count() }
+            vim.cmd('botright new')
+            local other = vim.api.nvim_get_current_win()
+            vim.api.nvim_set_current_win(win)
+            refresh()
+            result[3], result[4] = rows(2), padding_count()
+            vim.api.nvim_win_close(other, true)
+            return result
+        ]=]), { { '今日は天気がいいから', '散歩しましょう。' }, 1,
+            { '今日は天気がいいから', '散歩しましょう。' }, 1 })
+    end)
+
+    test('concealed BudouX boundaries retain source positions and follow cursor reveal', function()
+        if not lua("return require('inkstone.lib.softwrap').conceal_aware()") then return end
+        for _, source in ipairs({ '今日は**天気が**いいから散歩しましょう。',
+            '今日は`天気が`いいから散歩しましょう。' }) do
+            lua([=[
+                setup({ ..., '', 'AFTER' })
+                vim.wo.list = true
+                refresh()
+            ]=], source)
+            equal(lua('return rows(2)'), { '今日は天気がいいから', '散歩しましょう。' })
+            equal(lua([=[
+                vim.cmd('normal! gg0yg$')
+                local first = vim.fn.getreg('"')
+                vim.cmd('normal! gg0gjg0yg$')
+                return first .. vim.fn.getreg('"')
+            ]=]), source)
+            lua([=[
+                vim.api.nvim_win_set_cursor(0, { 1, 0 })
+                vim.wo.concealcursor = ''
+                refresh()
+                assert(padding_count() <= 1, 'both source and concealed padding were displayed')
+                _G.budoux_before_move = require('inkstone.core.ui').cache[vim.api.nvim_get_current_buf()].n
+            ]=])
+            rpc('nvim_input', 'j')
+            lua([=[
+                assert(vim.wait(1000, function() return vim.api.nvim_win_get_cursor(0)[1] == 2 end, 5))
+                vim.cmd('redraw!')
+                assert(vim.deep_equal(rows(2), { '今日は天気がいいから', '散歩しましょう。' }),
+                    'cursor reveal left stale raw-width padding on the concealed line')
+                assert(padding_count() == 1)
+                assert(require('inkstone.core.ui').cache[vim.api.nvim_get_current_buf()].n == _G.budoux_before_move,
+                    'cursor reveal unnecessarily reparsed the paragraph')
+            ]=])
+        end
     end)
 
     test('viewport covers partially scrolled concealed rows and visible virtual filler', function()

@@ -129,12 +129,18 @@ shares BudouX/kinsoku decisions between virtual layout and source-backed ranges;
 source ranges preserve every whitespace byte. `lib/softwrap.lua` calculates
 source byte offsets and first/continuation budgets, matching native gutters,
 breakindent/showbreak and paragraph padding. Native motions/operators own source
-positions; anti-conceal does not remove wrap padding. Native conceal can leave
-short-looking rows because budgets include source Markdown delimiters.
+positions; anti-conceal does not remove wrap padding.
 Neovim 0.13 development builds with conceal-aware wrap already apply their
 displayed-width layout to Inkstone's persistent conceal extmarks and Tree-sitter
 conceal. No new enable flag is needed. This improves native reflow and source
-positions, but does not change the raw-source BudouX boundary calculation above.
+positions. A cached behavioral probe in `lib/softwrap.lua:conceal_aware`
+distinguishes it from earlier builds using a hidden scratch window and public
+text-height measurement. `request/highlights.lua` preserves native Tree-sitter
+conceal intervals separately from renderer-added conceal. For eligible rows,
+BudouX segments visible text and maps boundaries to original byte positions.
+Raw and projected padding are cached separately; `paragraph_concealed` selects
+the matching marks during display from the window's conceallevel, concealcursor,
+mode and cursor row. Cursor movement therefore needs no layout reparse.
 Visual modes follow `render_modes`; ordinary defaults omit them, so selection
 temporarily restores raw Markdown, source wrapping and window options. Leaving
 Visual restores decorations and native BudouX padding. Explicit Visual entries
@@ -158,10 +164,12 @@ Explicit `win_options.linebreak` takes precedence; true disables BudouX padding.
 `core/manager.lua` rebuilds geometry on window lifetime and relevant option
 events. Because persistent extmarks are buffer-wide, multiple views fall back
 to ordinary source wrapping until only one window remains. Other conservative
-fallbacks cover tabs/control characters, list display, unsupported indent
+fallbacks cover tabs/control characters, unsupported indent
 settings, `cpoptions+=n` with numbers and additional inline insertions. Source
 is never replaced on fallback. See `doc/rendering-features.md`, "Japanese
 paragraph layout", for the user contract and limits.
+`list` display preserves source character widths for ordinary tab-free rows and
+does not disable the layout. Splits showing different buffers remain eligible.
 
 Explicit `join=true` still uses `text/paragraph.lua` to wrap rendered inline
 chunks as virtual rows. It combines soft breaks but retains hard breaks and

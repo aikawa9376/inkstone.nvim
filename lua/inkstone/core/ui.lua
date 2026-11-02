@@ -263,6 +263,11 @@ end
 function Updater:hide(extmark, range)
     local mark = extmark:get()
 
+    if mark.paragraph_concealed ~= nil
+        and mark.paragraph_concealed ~= require('inkstone.lib.softwrap').concealed(self.win, mark.start_row, self.mode) then
+        return true
+    end
+
     if mark.typography then
         if range and range[1] <= mark.typography[2] and range[2] >= mark.typography[1] then return true end
     end

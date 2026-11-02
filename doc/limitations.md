@@ -15,12 +15,13 @@ and [Neovim #14409](https://github.com/neovim/neovim/issues/14409).
 The nightly change does not cover legacy `:syntax` / `matchadd()` or ephemeral
 conceal. See the [current Neovim notes](https://neovim.io/doc/user/news/).
 
-Inkstone's native BudouX padding still calculates boundaries from source text;
-this is separate from Neovim's conceal-aware screen layout. Styled paragraphs
-can therefore still have shorter-looking rows, and rows with extra inline
-replacements retain the existing native-wrap fallback. Wrapped table cells and
-joined paragraphs use their own layout calculations. This is not full
-conceal-aware BudouX boundary selection.
+Inkstone's native BudouX padding detects conceal-aware behavior and calculates
+boundaries from visible Tree-sitter-concealed text, mapping them back to source
+positions. This covers ordinary bold and inline-code delimiters. Cursor reveal
+selects raw-width padding; older Neovim builds retain source-width boundaries.
+Rows with extra inline replacements (such as link icons), tabs or control
+characters still use the native-wrap fallback. Wrapped table cells and joined
+paragraphs use their own layout calculations.
 
 Viewport planning uses bounded `nvim_win_text_height()` when available, with an
 older-API fallback. It measures real wrapped screen rows and skips Inkstone's
