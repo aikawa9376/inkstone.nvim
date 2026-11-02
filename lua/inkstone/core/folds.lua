@@ -126,12 +126,35 @@ function M.closed(buf, block)
     return block.closed
 end
 
+-- Half-open ranges of rows currently hidden by displayed fold controls.
+-- After edits, descriptions can still refer to old source coordinates.
+function M.hidden(buf)
+    local decorator = require('inkstone.core.ui').cache[buf]
+    if not decorator or decorator:changed() then return {} end
+    local ranges = {}
+    for _, extmark in ipairs(decorator:get()) do
+        local mark = extmark:get()
+        if mark.fold_hidden and extmark:shown() then
+            ranges[#ranges + 1] = { mark.start_row, (mark.opts.end_row or mark.start_row) + 1 }
+        end
+    end
+    table.sort(ranges, function(a, b) return a[1] < b[1] end)
+    local merged = {}
+    for _, range in ipairs(ranges) do
+        local last = merged[#merged]
+        if last and range[1] <= last[2] then last[2] = math.max(last[2], range[2])
+        else merged[#merged + 1] = range end
+    end
+    return merged
+end
+
 function M.apply(context, parser, marks)
     local config = context.config.folds
     if not config.enabled then return marks end
     local blocks = M.blocks(context.buf, parser, config, context.view)
     local hidden, extra = {}, {}
-    local anchors, code_anchors = {}, {}
+    local anchors, code_anchors, open_code = {}, {}, {}
+    local str = require('inkstone.lib.str')
     local function add(row, opts, col)
         extra[#extra + 1] = { conceal = true, modes = config.render_modes, start_row = row, start_col = col or 0,
             fold_hidden = opts.conceal_lines ~= nil, opts = opts }
@@ -143,6 +166,19 @@ function M.apply(context, parser, marks)
         if not overlay_only then opts.conceal_lines = '' end
         add(row, opts)
         extra[#extra].conceal = false
+    end
+    local function fold_info(block, closed)
+        local value = closed and ('▶ %d lines'):format(block.end_row - block.start_row - 1) or '▼'
+        add(block.start_row, { virt_text_pos = 'right_align', virt_text = { { value, 'Comment' } },
+            priority = 160, hl_mode = 'combine' })
+        extra[#extra].conceal = false
+        extra[#extra].folded = closed
+        return str.width(value)
+    end
+    local function title(value, reserved, col)
+        local width = math.max(0, context:window_width() - reserved - (col or 0) - 1)
+        if str.width(value) <= width then return value end
+        return width > 0 and str.sub(value, 1, width - 1) .. '…' or ''
     end
     for _, block in ipairs(blocks) do
         local inside = false
@@ -163,7 +199,10 @@ function M.apply(context, parser, marks)
                     { ('▶ %d lines'):format(block.end_row - block.start_row - 1), 'Comment' },
                     { ' · ' .. block.title, 'InkstoneDetailsHeader' },
                 } or { { '▼ ' .. block.title, 'InkstoneDetailsHeader' } }
-                local width = require('inkstone.lib.str').line_width(label)
+                if config.position == 'right' then
+                    label = { { title(block.title, fold_info(block, closed)), 'InkstoneDetailsHeader' } }
+                end
+                local width = str.line_width(label)
                 local padding = math.max(0, vim.fn.strdisplaywidth(first) - width)
                 if padding > 0 then label[#label + 1] = { string.rep(' ', padding), 'InkstoneDetailsBody' } end
                 -- Overlay the HTML wrapper so concealcursor cannot expose the
@@ -197,16 +236,29 @@ function M.apply(context, parser, marks)
                 local label = { { ('▶ %d lines'):format(block.end_row - block.start_row - 1), 'Comment' } }
                 if language then label[#label + 1] = { ' · ' .. language, context.config.code.highlight_fallback } end
                 code_anchors[block.start_row] = block.start_col or 0
-                add(block.start_row, { end_col = #first, conceal = '', virt_text_pos = 'inline', virt_text = label }, block.start_col)
+                if config.position == 'right' then
+                    local prefix = str.width(first:sub(1, block.start_col or 0))
+                    label = { { title(language or 'Code', fold_info(block, true), prefix), context.config.code.highlight_fallback } }
+                end
+                local padding = math.max(0, str.width(first:sub((block.start_col or 0) + 1)) - str.line_width(label))
+                if padding > 0 then label[#label + 1] = { string.rep(' ', padding), context.config.code.highlight } end
+                add(block.start_row, { end_col = #first, virt_text_pos = 'overlay', virt_text = label,
+                    priority = 150 }, block.start_col)
                 -- This is an explicit fold control; keep its state visible at
                 -- the cursor while Normal-mode rendering remains active.
                 extra[#extra].conceal = false
                 extra[#extra].folded = true
             elseif closed then
-                add(block.start_row, { virt_text_pos = 'eol', virt_text = {
-                    { (' ▶ %d lines'):format(block.end_row - block.start_row - 1), 'Comment' },
-                } })
-                extra[#extra].folded = true
+                if config.position == 'right' then fold_info(block, true)
+                else
+                    add(block.start_row, { virt_text_pos = 'eol', virt_text = {
+                        { (' ▶ %d lines'):format(block.end_row - block.start_row - 1), 'Comment' },
+                    } })
+                    extra[#extra].folded = true
+                end
+            end
+            if block.kind == 'code' and not closed and entry(context.buf, block) then
+                open_code[block.start_row] = block.start_col or 0
             end
         end
     end
@@ -221,6 +273,12 @@ function M.apply(context, parser, marks)
         local code_col = code_anchors[mark.start_row]
         if not inside and not (anchors[mark.start_row] and mark.opts.conceal_lines)
             and not (code_col and mark.start_col >= code_col) then
+            local open_col = open_code[mark.start_row]
+            if open_col and mark.start_col >= open_col then
+                -- Opening a fold leaves the cursor on its control. Retain
+                -- that header just as we retain a collapsed fold summary.
+                mark.conceal = false
+            end
             result[#result + 1] = mark
         end
     end

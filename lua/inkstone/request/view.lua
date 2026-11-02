@@ -9,6 +9,22 @@ local log = require('inkstone.core.log')
 local View = {}
 View.__index = View
 
+local function window_ranges(buf, win, offset)
+    local hidden = require('inkstone.core.folds').hidden(buf)
+    if #hidden > 0 and env.win.get(win, 'conceallevel') < 2 then hidden = {} end
+    local range = #hidden > 0 and env.range(buf, win, offset, hidden) or env.range(buf, win, offset)
+    local ranges, first = {}, range[1]
+    for _, conceal in ipairs(hidden) do
+        if conceal[1] >= range[2] then break end
+        if conceal[2] > first then
+            if conceal[1] > first then ranges[#ranges + 1] = { first, conceal[1] } end
+            first = math.max(first, conceal[2])
+        end
+    end
+    if first < range[2] then ranges[#ranges + 1] = { first, range[2] } end
+    return ranges
+end
+
 ---@param buf integer
 ---@return render.md.request.View
 function View.new(buf)
@@ -16,7 +32,7 @@ function View.new(buf)
     self.buf = buf
     local ranges = {} ---@type render.md.Range[]
     for _, win in ipairs(env.buf.wins(buf)) do
-        ranges[#ranges + 1] = env.range(buf, win, 10)
+        vim.list_extend(ranges, window_ranges(buf, win, 10))
     end
     self.ranges = interval.coalesce(ranges)
     return self
@@ -34,13 +50,14 @@ end
 ---@param win integer
 ---@return boolean
 function View:contains(win)
-    local rows = env.range(self.buf, win, 0)
-    for _, range in ipairs(self.ranges) do
-        if interval.contains(range, rows) then
-            return true
+    for _, rows in ipairs(window_ranges(self.buf, win, 0)) do
+        local covered = false
+        for _, range in ipairs(self.ranges) do
+            if interval.contains(range, rows) then covered = true; break end
         end
+        if not covered then return false end
     end
-    return false
+    return true
 end
 
 ---@param node TSNode

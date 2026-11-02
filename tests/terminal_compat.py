@@ -344,11 +344,12 @@ class TerminalTests(unittest.TestCase):
 
         def check():
             text = self.visible_text()
-            self.assertIn('▼ Box', text)
+            self.assertIn('Box', text)
+            self.assertIn('▼', text)
             self.assertNotIn('<details', text)
             self.assertNotIn('<summary', text)
             self.assertNotIn('</details', text)
-            header_row = next(row for row in range(24) if '▼ Box' in str(self.screen.line(row)))
+            header_row = next(row for row in range(24) if 'Box' in str(self.screen.line(row)))
             header = str(self.screen.line(header_row))
             self.assertEqual(self.screen.line(header_row).cursor_from(header.index('Box')).fg, (0xffcc00 << 8) | 2)
             body_row = next(row for row in range(24) if 'BODY' in str(self.screen.line(row)))

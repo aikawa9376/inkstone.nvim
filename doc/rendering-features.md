@@ -389,7 +389,7 @@ state without taking over Neovim's `foldmethod` or editing source.
 
 ```lua
 require('inkstone').setup({
-    folds = { enabled = true, code = true, callout = true, details = true },
+    folds = { enabled = true, code = true, callout = true, details = true, position = 'right' },
 })
 vim.keymap.set('n', '<leader>mf', '<Plug>(InkstoneToggleFold)')
 ```
@@ -419,14 +419,29 @@ is outside the supported block layout.
 
 Code fences have independent fold state inside details. `Ctrl+i` on code folds
 the code; use the details title to fold the enclosing details. Reopening a
-parent preserves the children's states. Collapsed details display
-`▶ N lines · title`, counting the hidden source rows, including summary/blank
-lines and the closing tag. Expanded details display `▼ title`.
-A collapsed code block has a dedicated
-`▶ N lines · language` summary that stays visible at the cursor and cannot be
-covered by the usual code-language overlay or padding. Anti-conceal margins
+parent preserves the children's states. `folds.position = 'right'` is the
+default: details titles and code language names stay on the left, while
+`▶ N lines` is aligned to the window's right edge. Expanded details show `▼`
+at the right edge. Callout counts use the same position. N counts hidden source
+rows, including summary/blank lines and the closing tag. Long titles are clipped
+to leave space for the information; alignment follows window resizing and gutters.
+
+Set `folds.position = 'left'` for the compact `▶ N lines · title` /
+`▶ N lines · language` prefix and `▼ title` expanded details header. Callout
+counts then follow their title. This setting controls fold information;
+`code.position` independently controls ordinary expanded code-language labels.
+Collapsed code summaries stay visible at the cursor and cannot be covered by
+the usual code-language overlay or padding. Explicitly reopening code retains
+its decorated header at the cursor after the action. Visual/raw modes continue
+to follow `render_modes`.
+Anti-conceal margins
 around the visible fold anchor do not reopen a collapsed body; deliberate
 cursor entry into its source can still restore it when anti-conceal is enabled.
+
+Visible ranges skip currently hidden fold rows. Opening or closing a long fold
+automatically decorates the newly visible content, including code after a closed
+fold, without requiring a cursor move or scroll. Hidden code bodies stay outside
+the render viewport.
 
 Attached buffers, including ordinary Markdown buffers and the side preview,
 automatically have Normal-mode, buffer-local `j/k`, `gj/gk` and Up/Down mappings

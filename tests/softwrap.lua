@@ -158,7 +158,7 @@ return function(test, equal)
         ]=])
         equal(result.title, 'Styled Title')
         assert(result.body)
-        assert(result.open:find('▼ Styled Title', 1, true))
+        assert(result.open:find('Styled Title', 1, true) and result.open:find('▼', 1, true))
         for _, state in ipairs({ result.open, result.closed, result.reopened }) do
             assert(not state:find('<details', 1, true) and not state:find('<summary', 1, true) and not state:find('</summary', 1, true))
         end
@@ -185,12 +185,105 @@ return function(test, equal)
         assert(result.open:find('UNIQUE_CODE_A', 1, true))
         assert(not result.code_closed:find('UNIQUE_CODE_A', 1, true))
         assert(result.code_closed:find('▶ 3 lines', 1, true), 'collapsed code must have a visible summary')
-        assert(result.code_closed:find('· lua', 1, true))
-        assert(result.parent_closed:find('▶ 11 lines · Outer', 1, true), 'details must show its hidden source-row count')
+        assert(result.code_closed:find('lua', 1, true))
+        assert(result.parent_closed:find('▶ 11 lines', 1, true) and result.parent_closed:find('Outer', 1, true),
+            'details must show its title and hidden source-row count')
         assert(not result.parent_closed:find('DETAILS_TAIL', 1, true))
         assert(result.parent_reopened:find('▶ 3 lines', 1, true), 'nested collapsed state must be visibly identifiable')
         assert(result.parent_reopened:find('DETAILS_TAIL', 1, true))
         assert(result.code_opened:find('UNIQUE_CODE_A', 1, true))
+    end)
+
+    test('long folds decorate newly visible code without a scroll or forced refresh', function()
+        local result = lua([=[
+            local lines = { '<details>', '<summary>Long hidden code</summary>', '', '```lua' }
+            for i = 1, 1600 do lines[#lines + 1] = 'local hidden = ' .. i end
+            vim.list_extend(lines, { '```', '', '</details>', '', '```lua', 'local visible = 42', '```', '', 'AFTER' })
+            setup(lines, { anti_conceal = { enabled = true }, code = { sign = false } })
+            local buf, ui = vim.api.nvim_get_current_buf(), require('inkstone.core.ui')
+            local visible = #lines - 3
+            local function background(row)
+                for _, extmark in ipairs(ui.cache[buf]:get()) do
+                    local mark = extmark:get()
+                    if mark.start_row == row and mark.conceal == 'code_background' and extmark:shown() then return true end
+                end
+            end
+            assert(vim.wait(2000, function() return background(visible - 1) end, 5),
+                'code displayed after a long closed fold was left undecorated')
+            local initial = table.concat(rows(18), '\n')
+            local context = require('inkstone.request.context').get(buf)
+            local count = 0
+            for _, range in ipairs(context.view.ranges) do count = count + range[2] - range[1] end
+            assert(count < 100, 'hidden code body must not become a giant render viewport')
+            vim.api.nvim_win_set_cursor(0, { 1, 0 })
+            require('inkstone.api').toggle_fold()
+            assert(vim.wait(2000, function() return background(4) end, 5), 'opening the parent left its code undecorated')
+            vim.api.nvim_win_set_cursor(0, { 5, 0 })
+            require('inkstone.api').toggle_fold()
+            local function closed()
+                local folds = require('inkstone.core.folds')
+                for _, block in ipairs(folds.blocks(buf, vim.treesitter.get_parser(buf), require('inkstone.state').get(buf).folds)) do
+                    if block.kind == 'code' and block.start_row == 3 then return folds.closed(buf, block) end
+                end
+            end
+            assert(vim.wait(2000, function() return closed() and not background(4) end, 5))
+            require('inkstone.api').toggle_fold()
+            assert(vim.wait(2000, function() return not closed() and background(4) end, 5))
+            local reopened = table.concat(rows(18), '\n')
+            assert(not reopened:find('```', 1, true), 'opening at the code control exposed its source fence')
+            assert(vim.deep_equal(vim.api.nvim_buf_get_lines(buf, 0, -1, false), lines))
+            return { initial = initial, reopened = reopened }
+        ]=])
+        assert(result.initial:find('visible', 1, true))
+        assert(not result.initial:find('```', 1, true))
+        assert(result.reopened:find('local hidden = 1', 1, true))
+        rpc('nvim_input', '1200jzt')
+        lua([=[
+            local buf, ui = vim.api.nvim_get_current_buf(), require('inkstone.core.ui')
+            assert(vim.wait(2000, function()
+                local row = vim.api.nvim_win_get_cursor(0)[1] - 1
+                for _, extmark in ipairs(ui.cache[buf]:get()) do
+                    local mark = extmark:get()
+                    if row > 1000 and mark.start_row == row and mark.conceal == 'code_background' and extmark:shown() then return true end
+                end
+            end, 5), 'scrolling deep inside a long code block lost its background')
+            local n = ui.cache[buf].n
+            vim.wait(250)
+            assert(ui.cache[buf].n == n, 'fold layout must settle without a render loop')
+        ]=])
+    end)
+
+    test('fold information defaults to the right and can use the left through resize', function()
+        for _, position in ipairs({ 'right', 'left' }) do
+            for _, width in ipairs({ 24, 48 }) do
+                rpc('nvim_ui_try_resize', width, 20)
+                local result = lua([=[
+                    local position = ...
+                    setup({ '<details>', '<summary>Title</summary>', 'body', '</details>', '',
+                        '```lua', 'local value = 42', '```', '', '> [!NOTE]- Note', '> callout body', '', 'AFTER' },
+                        { folds = position == 'left' and { position = 'left' } or {} })
+                    assert(require('inkstone.state').get(vim.api.nvim_get_current_buf()).folds.position == position)
+                    if vim.o.columns == 48 then vim.wo.number, vim.wo.numberwidth = true, 4; refresh() end
+                    vim.api.nvim_win_set_cursor(0, { 7, 0 })
+                    require('inkstone.api').toggle_fold()
+                    assert(vim.wait(2000, function() return not table.concat(rows(18), '\n'):find('local value', 1, true) end, 5))
+                    assert(vim.deep_equal(require('inkstone.state').validate(), {}))
+                    return rows(18)
+                ]=], position)
+                for _, title in ipairs({ 'Title', 'lua', 'Note' }) do
+                    local line
+                    for _, row in ipairs(result) do if row:find(title, 1, true) then line = row; break end end
+                    assert(line, 'missing fold title: ' .. title)
+                    local info = assert(line:find('▶', 1, true), line)
+                    local label = assert(line:find(title, 1, true))
+                    if position == 'right' then
+                        assert(info > label, 'right fold information covered its title: ' .. line)
+                        assert(vim.fn.strdisplaywidth(line) == width, 'fold information did not reach the right edge: ' .. line)
+                    elseif title ~= 'Note' then assert(info < label, 'left fold information lost its prefix: ' .. line) end
+                end
+            end
+        end
+        rpc('nvim_ui_try_resize', 24, 20)
     end)
 
     test('closed details and code stay closed when anti-conceal margins touch their body', function()

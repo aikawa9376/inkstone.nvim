@@ -53,16 +53,23 @@ end
 ---@param buf integer
 ---@param win integer
 ---@param offset integer
+---@param hidden? render.md.Range[] Half-open, sorted conceal ranges.
 ---@return render.md.Range
-function M.range(buf, win, offset)
+function M.range(buf, win, offset, hidden)
     local top = math.max(M.win.view(win).topline - 1 - offset, 0)
     local bottom = top
     local lines = vim.api.nvim_buf_line_count(buf)
     local size = vim.api.nvim_win_get_height(win) + (2 * offset)
+    local index = 1
+    hidden = hidden or {}
     while bottom < lines and size > 0 do
-        bottom = bottom + 1
-        if M.row.visible(win, bottom) then
-            size = size - 1
+        while hidden[index] and hidden[index][2] <= bottom do index = index + 1 end
+        local concealed = hidden[index]
+        if concealed and concealed[1] <= bottom then
+            bottom = math.min(lines, concealed[2])
+        else
+            bottom = bottom + 1
+            if M.row.visible(win, bottom) then size = size - 1 end
         end
     end
     ---@type render.md.Range

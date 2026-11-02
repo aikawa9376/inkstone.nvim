@@ -18,10 +18,12 @@ M.typography = {
 ---@field code boolean
 ---@field callout boolean
 ---@field details boolean
+---@field position 'left'|'right'
 M.folds = {
-    default = { enabled = true, render_modes = false, code = true, callout = true, details = true },
+    default = { enabled = true, render_modes = false, code = true, callout = true, details = true, position = 'right' },
     schema = function()
-        return M.base.schema({ code = { type = 'boolean' }, callout = { type = 'boolean' }, details = { type = 'boolean' } })
+        return M.base.schema({ code = { type = 'boolean' }, callout = { type = 'boolean' }, details = { type = 'boolean' },
+            position = { enum = { left = 'left', right = 'right' } } })
     end,
 }
 

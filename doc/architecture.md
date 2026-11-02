@@ -11,6 +11,12 @@ Markdown feature coverage remain available; source provenance is in UPSTREAM.jso
 2. `request/view.lua` captures visible ranges plus a ten-row margin and asks the
    native Tree-sitter parser to parse asynchronously. Completion checks the
    buffer tick, mode, request identity, window validity and displayed buffer.
+   View ranges skip shown `fold_hidden` intervals, extending the row budget to
+   cover visible content beyond long folds without including their hidden bodies.
+   The same range calculation checks coverage. After displaying conceal marks,
+   `core/ui.lua` schedules another update if any buffer window exposes content
+   outside the parsed ranges, so fold layout changes settle without a scroll.
+   Changed source ticks invalidate old conceal coordinates for range planning.
 3. `core/handlers.lua` snapshots native trees once for a synchronous handler
    pass and evaluates inline handlers before block handlers. Highlights, folds
    and media share that enumeration; successful passes release the snapshot.
@@ -190,13 +196,21 @@ closing details tag are hidden while expanded. Toggle selection stops at a
 collapsed ancestor, so source motions into its hidden code cannot toggle that
 child. Closed code folds retain a visible delimiter/summary anchor even without
 a language label.
-Their dedicated inline summary replaces renderer-owned marks on the opening
+Their dedicated overlay summary replaces renderer-owned marks on the opening
 fence (retaining any container prefix), so language overlays and code padding
 cannot cover the collapse indicator. It remains visible at the cursor during
 rendering; raw/Visual mode still follows the normal render-mode policy.
-Collapsed details use the same count-first control, `▶ N lines · title`, where
-N is the number of hidden source rows (including summary/blank lines and the
-closing tag). It remains visible at the cursor; expanded details keep `▼ title`.
+`folds.position` defaults to `right`: title/language remains on the left and a
+separate `right_align` extmark shows `▶ N lines` (or `▼` for expanded details)
+at priority 160. Titles are clipped by display width to reserve this space;
+the title overlay has priority 150. Native right alignment follows resizing and
+gutters. `position=left` retains `▶ N lines · title/language` and `▼ title`;
+callouts use the right edge or inline trailing count respectively. N counts
+hidden source rows, including summary/blank lines and the closing tag.
+Explicitly reopened code keeps its opening-row renderer marks under anti-conceal
+while rendered, because the toggle places the cursor on that control. Ordinary
+untoggled code retains normal cursor-line anti-conceal behavior. This policy is
+independent of the expanded code label's `code.position`.
 Details controls overlay the original tag row and pad to its display width, so
 native cursor-line conceal rules cannot expose trailing HTML. Multiline summary
 rows and the closing tag are hidden, with blank overlays for cursor restoration.

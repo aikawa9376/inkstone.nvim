@@ -211,6 +211,14 @@ function Updater:display()
     require('inkstone.core.typography').update(context, self.decorator:get())
     require('inkstone.core.media').update(context, range, self.editing)
     state.on.render({ buf = self.buf, win = self.win })
+    -- Applying conceal can expose distant source rows in the same screen.
+    -- Populate their decorations without waiting for another cursor/scroll event.
+    for _, win in ipairs(env.buf.wins(self.buf)) do
+        if not context.view:contains(win) then
+            M.update(self.buf, self.win, 'FoldLayout', false)
+            break
+        end
+    end
 end
 
 -- A wrapped table is one display layout. Restore its source as a unit so raw

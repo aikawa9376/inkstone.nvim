@@ -65,6 +65,8 @@ Normal モードの `Ctrl+i` は、カーソル位置に応じて fold を開閉
 
 `<details>` / `<summary>` はタイトル付きの開閉ヘッダーと本文背景で表示します。本文は空行の有無によらず見出し・表・コードなどを装飾します。コードの言語別の色には対応する Tree-sitter パーサーが必要です。`sh`・`py`・`js` などの一般的な言語名の略記にも対応します。
 
+fold の開閉マーク・行数は既定で右端に表示し、タイトル／言語名は左に残します。`folds = { position = 'left' }` で左側の表示に切り替えられます。
+
 Snacks の Kitty 画像表示を使う場合、表内の画像はセル幅に合わせて縮小し、高さに合わせて罫線も伸ばします。GIF・動画は変換可能な静止プレビューとして扱います。[表内画像の条件](doc/rendering-features.md#images-inside-tables) も参照してください。
 
 - Lua: `require('inkstone').setup(opts)`
