@@ -4,6 +4,10 @@ local list = require('inkstone.lib.list')
 ---@class render.md.Env
 local M = {}
 
+---@private
+---@type boolean?
+M.text_height_supported = nil
+
 ---@param key 'ft'|'cmd'
 ---@return string[]
 function M.lazy(key)
@@ -54,11 +58,51 @@ end
 ---@param win integer
 ---@param offset integer
 ---@param hidden? render.md.Range[] Half-open, sorted conceal ranges.
+---@param native? boolean False while displayed conceal coordinates are stale.
 ---@return render.md.Range
-function M.range(buf, win, offset, hidden)
-    local top = math.max(M.win.view(win).topline - 1 - offset, 0)
-    local bottom = top
+function M.range(buf, win, offset, hidden, native)
+    local view = M.win.view(win)
+    local top = math.max(view.topline - 1 - offset, 0)
     local lines = vim.api.nvim_buf_line_count(buf)
+    if native ~= false and M.text_height_supported ~= false then
+        local row, remaining = view.topline - 1, math.max(1, vim.api.nvim_win_get_height(win) - view.topfill)
+        local index, first = 1, true
+        local ok, bottom = pcall(function()
+            while row < lines and remaining > 0 do
+                while hidden and hidden[index] and hidden[index][2] <= row do index = index + 1 end
+                local concealed = hidden and hidden[index]
+                if concealed and concealed[1] <= row then
+                    row = concealed[2]
+                else
+                    -- Never ask native measurement to walk a giant concealed
+                    -- fold body: measure visible pieces and jump between them.
+                    local result = vim.api.nvim_win_text_height(win, {
+                        start_row = row, end_row = concealed and concealed[1] - 1 or lines - 1,
+                        start_vcol = first and view.skipcol or nil, max_height = remaining,
+                    })
+                    assert(type(result.end_row) == 'number', 'bounded text height unavailable')
+                    M.text_height_supported = true
+                    local next_row = result.end_row + 1
+                    if result.end_vcol == 0 then
+                        local folded = vim.api.nvim_win_call(win, function() return vim.fn.foldclosedend(next_row) end)
+                        if folded > 0 then next_row = math.max(next_row, folded) end
+                    end
+                    assert(next_row > row, 'text height did not advance')
+                    row, remaining = next_row, remaining - result.all
+                end
+                first = false
+            end
+            return math.min(lines, row + offset)
+        end)
+        if ok then
+            M.text_height_supported = true
+            return { top, bottom }
+        end
+        -- Older Neovim versions lack max_height/end_row. Keep the previous
+        -- source-row planner rather than requiring a nightly installation.
+        if M.text_height_supported == nil then M.text_height_supported = false end
+    end
+    local bottom = top
     local size = vim.api.nvim_win_get_height(win) + (2 * offset)
     local index = 1
     hidden = hidden or {}

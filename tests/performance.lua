@@ -19,6 +19,58 @@ return function(test, equal, buffer)
         return buf, render, parser
     end
 
+    test('native viewport accounts for wrap, conceal and fold gaps with an older-API fallback', function()
+        local env = require('inkstone.lib.env')
+        local api = vim.api.nvim_win_text_height
+        local lines = {}
+        for i = 1, 300 do lines[i] = 'row ' .. i end
+        local buf = buffer(lines)
+        local win = vim.api.nvim_get_current_win()
+        local height, width = vim.api.nvim_win_get_height(win), vim.api.nvim_win_get_width(win)
+        vim.wo.wrap, vim.wo.conceallevel, vim.wo.concealcursor = true, 3, 'nvic'
+        lines[1] = 'a' .. string.rep('x', width * (height + 5)) .. 'b'
+        vim.api.nvim_buf_set_lines(buf, 0, 1, false, { lines[1] })
+        vim.api.nvim_win_set_cursor(win, { 1, 0 })
+        local ok, result = pcall(api, win, { start_row = 0, max_height = 1 })
+        if ok and result.end_row then
+            env.text_height_supported = nil
+            equal(env.range(buf, win, 0), { 0, 1 })
+            assert(env.range(buf, win, 0, nil, false)[2] >= height)
+            local ns = vim.api.nvim_create_namespace('inkstone-native-viewport-test')
+            vim.api.nvim_buf_set_extmark(buf, ns, 0, 1, { end_col = #lines[1] - 1, conceal = '' })
+            if api(win, { start_row = 0, end_row = 0 }).all == 1 then
+                equal(env.range(buf, win, 0), { 0, height })
+            end
+            vim.api.nvim_buf_clear_namespace(buf, ns, 0, -1)
+            lines[1] = 'visible'
+            vim.api.nvim_buf_set_lines(buf, 0, 1, false, { lines[1] })
+            vim.api.nvim_buf_set_extmark(buf, ns, 1, 0, { end_row = 150, end_col = 0, conceal_lines = '' })
+            local calls = 0
+            vim.api.nvim_win_text_height = function(w, opts)
+                calls = calls + 1
+                assert(opts.end_row < 1 or opts.start_row >= 151, 'native measurement walked a hidden fold body')
+                return api(w, opts)
+            end
+            equal(env.range(buf, win, 0, { { 1, 151 } }), { 0, height + 150 })
+            equal(calls, 2)
+            vim.api.nvim_win_text_height = api
+            vim.api.nvim_buf_clear_namespace(buf, ns, 0, -1)
+            vim.cmd('2,151fold')
+            equal(env.range(buf, win, 0, { { 10, 20 } }), { 0, height + 149 })
+            vim.cmd('normal! zE')
+        end
+        local attempts = 0
+        env.text_height_supported = nil
+        vim.api.nvim_win_text_height = function() attempts = attempts + 1; error('Invalid key: max_height') end
+        equal(env.range(buf, win, 5), env.range(buf, win, 5, nil, false))
+        equal(env.range(buf, win, 5), env.range(buf, win, 5, nil, false))
+        equal(attempts, 1)
+        vim.api.nvim_win_text_height = api
+        env.text_height_supported = nil
+        equal(vim.api.nvim_buf_get_lines(buf, 0, -1, false), lines)
+        vim.api.nvim_buf_delete(buf, { force = true })
+    end)
+
     test('native paragraph layout is viewport bounded and caches source boundaries', function()
         local lines = {}
         for i = 1, 1000 do lines[i] = ('日本語の文章を文節で折り返します。'):rep(6) end

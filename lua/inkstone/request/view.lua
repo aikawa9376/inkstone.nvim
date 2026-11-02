@@ -10,9 +10,12 @@ local View = {}
 View.__index = View
 
 local function window_ranges(buf, win, offset)
-    local hidden = require('inkstone.core.folds').hidden(buf)
+    local hidden, stale = require('inkstone.core.folds').hidden(buf)
     if #hidden > 0 and env.win.get(win, 'conceallevel') < 2 then hidden = {} end
-    local range = #hidden > 0 and env.range(buf, win, offset, hidden) or env.range(buf, win, offset)
+    local range
+    if stale then range = env.range(buf, win, offset, hidden, false)
+    elseif #hidden > 0 then range = env.range(buf, win, offset, hidden)
+    else range = env.range(buf, win, offset) end
     local ranges, first = {}, range[1]
     for _, conceal in ipairs(hidden) do
         if conceal[1] >= range[2] then break end

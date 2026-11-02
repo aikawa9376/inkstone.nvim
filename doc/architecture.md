@@ -17,6 +17,15 @@ Markdown feature coverage remain available; source provenance is in UPSTREAM.jso
    `core/ui.lua` schedules another update if any buffer window exposes content
    outside the parsed ranges, so fold layout changes settle without a scroll.
    Changed source ticks invalidate old conceal coordinates for range planning.
+   When `nvim_win_text_height()` supports `max_height` and returns `end_row`,
+   `lib/env.lua:range` measures actual screen rows in native code, including
+   character conceal, wrapping, native folds and virtual filler. It starts at
+   the real topline/skipcol and adjusts for visible topfill; the ten-row source
+   margin is applied afterward. Calls are split around known fold conceal
+   intervals so native measurement does not walk giant hidden bodies. Native
+   folds crossing these intervals advance to `foldclosedend` once rather than
+   counting the same fold twice. Unsupported APIs and stale source coordinates
+   use the previous source-row planner. Capability detection is cached per process.
 3. `core/handlers.lua` snapshots native trees once for a synchronous handler
    pass and evaluates inline handlers before block handlers. Highlights, folds
    and media share that enumeration; successful passes release the snapshot.
@@ -122,6 +131,10 @@ source byte offsets and first/continuation budgets, matching native gutters,
 breakindent/showbreak and paragraph padding. Native motions/operators own source
 positions; anti-conceal does not remove wrap padding. Native conceal can leave
 short-looking rows because budgets include source Markdown delimiters.
+Neovim 0.13 development builds with conceal-aware wrap already apply their
+displayed-width layout to Inkstone's persistent conceal extmarks and Tree-sitter
+conceal. No new enable flag is needed. This improves native reflow and source
+positions, but does not change the raw-source BudouX boundary calculation above.
 Visual modes follow `render_modes`; ordinary defaults omit them, so selection
 temporarily restores raw Markdown, source wrapping and window options. Leaving
 Visual restores decorations and native BudouX padding. Explicit Visual entries

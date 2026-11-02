@@ -128,9 +128,11 @@ end
 
 -- Half-open ranges of rows currently hidden by displayed fold controls.
 -- After edits, descriptions can still refer to old source coordinates.
+---@return render.md.Range[], boolean? stale
 function M.hidden(buf)
     local decorator = require('inkstone.core.ui').cache[buf]
-    if not decorator or decorator:changed() then return {} end
+    if not decorator then return {} end
+    if decorator:changed() then return {}, true end
     local ranges = {}
     for _, extmark in ipairs(decorator:get()) do
         local mark = extmark:get()

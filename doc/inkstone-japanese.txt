@@ -2,6 +2,11 @@
 
 Use |inkstone.txt| for inherited configuration and API reference.
 
+Nightly conceal-aware wrap automatically applies to persistent extmark and
+Tree-sitter conceal. Bounded native text-height measurement plans viewports
+when supported; older APIs retain the existing source-row fallback. BudouX
+source-boundary selection remains separate from native conceal-aware reflow.
+
 SETUP
 >
   require('inkstone').setup({

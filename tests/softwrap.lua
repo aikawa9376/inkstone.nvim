@@ -746,6 +746,52 @@ return function(test, equal)
         equal(actual[5], true)
     end)
 
+    test('viewport covers partially scrolled concealed rows and visible virtual filler', function()
+        lua([=[
+            local lines = { '[label](https://example.org/abcdef) ' .. ('word '):rep(160) }
+            for i = 1, 80 do lines[#lines + 1] = 'TAIL ' .. i end
+            setup(lines, { paragraph = { wrap = false } })
+            vim.wo.smoothscroll = true
+        ]=])
+        rpc('nvim_input', '30<C-e>')
+        lua([=[
+            assert(vim.wait(2000, function() return vim.fn.winsaveview().skipcol > 0 end, 5))
+            vim.wait(150)
+            vim.cmd('redraw!')
+            local view = vim.fn.winsaveview()
+            assert(view.topline == 1)
+            local last = vim.fn.line('w$') - 1
+            assert(last > 0, 'fixture must expose source rows after the wrapped topline')
+            local context = require('inkstone.request.context').get(vim.api.nvim_get_current_buf())
+            assert(context.view:contains(vim.api.nvim_get_current_win()))
+            local covered = false
+            for _, range in ipairs(context.view.ranges) do covered = covered or (range[1] <= last and range[2] > last) end
+            assert(covered, 'native viewport missed rows below a partially scrolled concealed line')
+            vim.wo.smoothscroll = false
+            local lines = {}
+            for i = 1, 100 do lines[i] = 'FILLER TAIL ' .. i end
+            setup(lines, { paragraph = { wrap = false } })
+            local ns = vim.api.nvim_create_namespace('inkstone-viewport-filler')
+            local filler = {}
+            for _ = 1, 25 do filler[#filler + 1] = { { 'VIRTUAL', 'Comment' } } end
+            vim.api.nvim_buf_set_extmark(0, ns, 0, 0, { virt_lines = filler, virt_lines_above = true })
+            vim.fn.winrestview({ topline = 1, topfill = 10 })
+            refresh()
+            local saved = vim.fn.winsaveview()
+            assert(saved.topfill > 0, 'fixture must retain visible filler above its first source row')
+            context = require('inkstone.request.context').get(vim.api.nvim_get_current_buf())
+            assert(context.view:contains(vim.api.nvim_get_current_win()))
+            last = vim.fn.line('w$') - 1
+            covered = false
+            for _, range in ipairs(context.view.ranges) do covered = covered or (range[1] <= last and range[2] > last) end
+            assert(covered, 'native viewport missed source below virtual filler')
+            if require('inkstone.lib.env').text_height_supported then
+                assert(context.view.ranges[#context.view.ranges][2] <= vim.api.nvim_win_get_height(0) - saved.topfill + 10,
+                    'virtual filler must reduce the source-row budget')
+            end
+        ]=])
+    end)
+
     test('shared windows and nowrap use source wrapping and closing a split restores BudouX', function()
         equal(lua([=[
             setup({'今日は天気がいいから散歩しましょう。'})

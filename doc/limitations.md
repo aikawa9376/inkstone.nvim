@@ -1,24 +1,31 @@
 # Limitations
 
-## Concealed text keeps unnecessary line breaks
+## Conceal and native wrapping depend on the Neovim build
 
-[ISSUE #82](https://github.com/MeanderingProgrammer/render-markdown.nvim/issues/82)
+Neovim's [conceal-aware wrap change](https://github.com/neovim/neovim/pull/42370),
+merged on 2026-10-31 for the 0.13 development cycle, lets persistent extmark and
+Tree-sitter conceal shrink native wrapped lines. Cursor/screen motions and mouse
+positions follow that displayed layout. Inkstone already emits persistent
+extmarks, so supported builds apply this automatically without a new option.
 
-When text is concealed and line wrapping is enabled the place where the line break
-happens will always remain the same. This means even if enough text is concealed
-to avoid the need for line wrapping that will not "free up" any lines.
+Older builds can retain line breaks based on the original Markdown width,
+especially around long concealed link destinations. The original reports were
+[upstream #82](https://github.com/MeanderingProgrammer/render-markdown.nvim/issues/82)
+and [Neovim #14409](https://github.com/neovim/neovim/issues/14409).
+The nightly change does not cover legacy `:syntax` / `matchadd()` or ephemeral
+conceal. See the [current Neovim notes](https://neovim.io/doc/user/news/).
 
-This problem manifests in many different ways and is particularly impactful when
-rendering tables with links. The result will often be what appear like random line
-breaks, and overall "ugly" results.
+Inkstone's native BudouX padding still calculates boundaries from source text;
+this is separate from Neovim's conceal-aware screen layout. Styled paragraphs
+can therefore still have shorter-looking rows, and rows with extra inline
+replacements retain the existing native-wrap fallback. Wrapped table cells and
+joined paragraphs use their own layout calculations. This is not full
+conceal-aware BudouX boundary selection.
 
-This problem stems from how neovim handles character-level concealment and line
-wrapping. Concealing more characters cannot remove those screen lines.
-Worse yet the issue seems incredibly complicated and unlikely to be solved any time
-soon [ISSUE #14409](https://github.com/neovim/neovim/issues/14409).
-
-For tables `pipe_table.wrap = true` provides an alternative on Neovim 0.11+ by
-completely replacing the lines with virtual lines.
+Viewport planning uses bounded `nvim_win_text_height()` when available, with an
+older-API fallback. It measures real wrapped screen rows and skips Inkstone's
+known concealed fold bodies between native calls. For tables,
+`pipe_table.wrap = true` still provides independent cell wrapping on Neovim 0.11+.
 
 ## `block` Width Removes Column Features
 

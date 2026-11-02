@@ -56,6 +56,39 @@ Lua parsing remained about 0.75–0.77s. These are CPU/API measurements, not
 terminal input-latency measurements or a claim of smooth rendering for every
 large paragraph.
 
+## Native viewport geometry
+
+Measured 2026-11-02 with Neovim 0.13.0-dev-1996+g96011df71a. This compares only
+`lib/env.lua:range`: the retained Lua source-row planner versus bounded native
+screen-height measurement. It uses an isolated hidden 40-column, 20-row window,
+10,000 source rows, a ten-row margin, one warm-up and nine samples per method.
+No Tree-sitter highlighter, handler generation or terminal painting is included.
+
+| Case | Lua planner median | Native planner median |
+| --- | ---: | ---: |
+| Plain rows | 0.177ms | 0.015ms |
+| First source row wraps beyond the window | 0.173ms | 0.026ms |
+| Long extmark-concealed text on the first row | 0.181ms | 0.058ms |
+| 9,000 Inkstone-style concealed rows | 0.172ms | 0.018ms |
+| 9,000-row native Neovim fold | 40.544ms | 0.015ms |
+
+The long wrapped-row case plans 11 source rows including margin instead of 40.
+For concealed bodies, the planner measures only the visible intervals and jumps
+between them; directly measuring all hidden rows would be slower. View handling
+then removes hidden intervals before parsing/decoration. Native folds avoid the
+old Lua-to-Vimscript `foldclosed()` call for every source row. These numbers are
+viewport-planning costs, not a whole-editor speedup or a parsing benchmark.
+Unsupported native API shapes use the previous planner automatically.
+
+```sh
+INKSTONE_BENCH_OUT=/tmp/inkstone-native-geometry.json \
+nvim --headless --clean -u NONE -l benchmarks/native_geometry.lua
+```
+
+The output includes native support status, both methods' source endpoints and
+per-case medians. Different screen-row accounting can yield different endpoints
+while still covering the visible text; the runner does not assert equality.
+
 ## Reproduce
 
 ```sh

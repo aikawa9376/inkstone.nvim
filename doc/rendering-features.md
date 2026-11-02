@@ -9,6 +9,13 @@ joined paragraphs, table/list/chart views and replaced formula blocks. With
 view. When enabled, the configured `above`/`below` range restores source as a
 whole layout. `disabled_modes` and normal `render_modes` still apply.
 
+On Neovim builds with conceal-aware wrap, persistent conceal already reflows at
+its displayed width; Inkstone needs no extra setting to use it. Native bounded
+screen-height measurement also drives viewport planning when available, with
+the previous planner retained for older APIs. Japanese BudouX source-boundary
+selection and wrapped table-cell layout remain separate; see
+[conceal limitations](limitations.md#conceal-and-native-wrapping-depend-on-the-neovim-build).
+
 ## Japanese paragraph layout
 
 ```lua
