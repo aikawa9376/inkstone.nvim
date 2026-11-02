@@ -8,6 +8,7 @@ import json
 import os
 from pathlib import Path
 import pty
+import re
 import select
 import shutil
 import signal
@@ -62,11 +63,23 @@ class TerminalTests(unittest.TestCase):
 
     def lua(self, body):
         expression = 'execute(' + json.dumps('lua ' + body, ensure_ascii=False) + ')'
-        try:
-            return subprocess.check_output(['nvim', '--server', self.nvim_socket, '--remote-expr', expression],
-                                           env=self.env, stderr=subprocess.PIPE).decode().strip()
-        except subprocess.CalledProcessError as error:
-            raise RuntimeError(error.stderr.decode()) from error
+        process = subprocess.Popen(['nvim', '--server', self.nvim_socket, '--remote-expr', expression],
+                                   env=self.env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        deadline = time.monotonic() + 20
+        while True:
+            try:
+                output, error = process.communicate(timeout=.01)
+                if process.returncode:
+                    raise RuntimeError(error.decode())
+                return output.decode().strip()
+            except subprocess.TimeoutExpired:
+                # Streaming redraws can fill the PTY while RPC is pending.
+                # Drain and observe those frames instead of deadlocking both ends.
+                self.pump(.005)
+                if time.monotonic() >= deadline:
+                    process.kill()
+                    process.communicate()
+                    raise RuntimeError('Neovim RPC timed out while pumping terminal output:\n' + self.visible_text())
 
     def pump(self, duration=0.15):
         deadline = time.monotonic() + duration
@@ -91,17 +104,25 @@ class TerminalTests(unittest.TestCase):
                 else:
                     os.write(self.fd, response + b'\x1b\\')
             observer = getattr(self, 'frame_observer', None)
-            chunks = (bytes((byte,)) for byte in data) if observer else (data,)
-            for part in chunks:
+            def feed(part):
                 chunk = part
                 while chunk:
                     used = self.screen.test_commit_write_buffer(chunk, self.screen.test_create_write_buffer())
                     self.screen.test_parse_written_data()
                     chunk = chunk[used:]
-                if observer:
-                    self.frame_tail = (getattr(self, 'frame_tail', b'') + part)[-8:]
-                    if self.frame_tail.endswith((b'\x1b[?2026l', b'\x1bP=2s\x1b\\')):
+            if observer:
+                prefix = getattr(self, 'frame_tail', b'')
+                combined, offset = prefix + data, 0
+                for match in re.finditer(rb'\x1b(?:\[\?2026l|P=2s\x1b\\)', combined):
+                    end = match.end() - len(prefix)
+                    if end > 0:
+                        feed(data[offset:end])
+                        offset = end
                         observer()
+                feed(data[offset:])
+                self.frame_tail = combined[-8:]
+            else:
+                feed(data)
 
     def render(self, lines, cell='trimmed', wrap=False, enabled=True, conceallevel=2, anti_conceal=False):
         self.lines = lines
@@ -128,6 +149,21 @@ class TerminalTests(unittest.TestCase):
     def assert_source(self):
         result = self.lua("print(vim.json.encode(vim.api.nvim_buf_get_lines(0,0,-1,false)))")
         self.assertEqual(json.loads(result), self.lines)
+
+    def assert_ascii_cells_outside_typography(self):
+        snapshot = json.loads(self.lua("local rows={}; local info=vim.fn.getwininfo(vim.api.nvim_get_current_win())[1]; "
+            "for r=info.winrow,info.winrow+info.height-1 do local s={}; "
+            "for c=info.wincol,info.wincol+info.width-1 do s[#s+1]=vim.fn.screenstring(r,c) end; rows[#rows+1]=table.concat(s) end; "
+            "print(vim.json.encode({rows=rows,top=info.winrow,left=info.wincol,rects=require('inkstone.core.typography').drawn}))"))
+        for row, line in enumerate(snapshot['rows'], snapshot['top'] - 1):
+            cells = self.screen.cpu_cells(row)
+            for col, expected in enumerate(line, snapshot['left'] - 1):
+                inside = any(r['screen_row'] - 1 <= row < r['screen_row'] - 1 + r['height']
+                             and r['screen_col'] - 1 <= col < r['screen_col'] - 1 + r['width']
+                             for r in snapshot['rects'])
+                if not inside:
+                    self.assertFalse(cells[col].get('mcd'), (row, col, cells[col]))
+                    self.assertEqual(cells[col]['text'] or ' ', expected or ' ', (row, col, self.visible_text()))
 
     def assert_table(self, aligned=True):
         text = self.visible_text()
@@ -1127,6 +1163,104 @@ class TerminalTests(unittest.TestCase):
         self.assertTrue(all(not missing for missing in frames), frames)
         self.assertEqual(self.lua('print(_G.native_toggles)'), '0')
         self.assertEqual(self.lua('print(vim.wo.cursorline)'), 'false')
+        self.assert_source()
+
+    def test_streaming_split_keeps_background_heading_frames(self):
+        self.tmux('set-option', '-g', 'allow-passthrough', 'on')
+        self.render(['BEFORE', '', '# FIRST', '', '## SECOND', '', '### THIRD', '', 'BODY'])
+        self.lua("vim.env.KITTY_WINDOW_ID='1'; _G.owner=vim.api.nvim_get_current_win(); "
+                 "require('inkstone.core.manager').init(); "
+                 "vim.cmd('botright vnew'); _G.stream=vim.api.nvim_get_current_buf(); "
+                 "require('inkstone.state').get(_G.stream,{typography={enabled=false},debounce=0}); "
+                 "vim.bo.filetype='markdown'; vim.treesitter.start(_G.stream,'markdown'); "
+                 "require('inkstone.api').render({buf=_G.stream}); vim.wait(200)")
+        self.pump(.2)
+        labels, frames = ('FIRST', 'SECOND', 'THIRD'), []
+
+        def observe():
+            text = self.scaled_text()
+            frames.append([label for label in labels if label not in text])
+
+        self.frame_observer = observe
+        self.lua("_G.owner_redraws=0; _G.overlay_packets=0; _G.foreign_repairs=0; "
+                 "vim.api.nvim_set_decoration_provider(vim.api.nvim_create_namespace('StressRedraws'),"
+                 "{on_start=function() _G.frame_owner=false; _G.frame_foreign=false end, "
+                 "on_win=function(_,w) if w==_G.owner then _G.owner_redraws=_G.owner_redraws+1; _G.frame_owner=true "
+                 "else _G.frame_foreign=true end; return false end}); "
+                 "local t=require('inkstone.core.typography'); local schedule=t.schedule; t.schedule=function(force) "
+                 "if force==true and _G.frame_foreign and not _G.frame_owner then _G.foreign_repairs=_G.foreign_repairs+1 end; "
+                 "return schedule(force) end; "
+                 "local send=vim.api.nvim_ui_send; vim.api.nvim_ui_send=function(s) "
+                 "if s:find(']66;',1,true) then _G.overlay_packets=_G.overlay_packets+1 end; return send(s) end; "
+                 "_G.stream_count=0; _G.stream_timer=vim.uv.new_timer(); "
+                 "_G.stream_timer:start(0,8,vim.schedule_wrap(function() "
+                 "if _G.stream_count>=40 then return end; "
+                 "_G.stream_count=_G.stream_count+1; "
+                 "vim.api.nvim_buf_set_lines(_G.stream,0,-1,false,{('stream update '.._G.stream_count):rep(8)}); "
+                 "require('inkstone.api').render({buf=_G.stream}); vim.cmd('redraw'); "
+                 "if _G.stream_count>=40 then _G.stream_timer:stop(); _G.stream_timer:close() end end))")
+        self.pump(.8)
+        self.frame_observer = None
+        self.assertEqual(self.lua('print(_G.stream_count)'), '40')
+        counts = json.loads(self.lua('print(vim.json.encode({owner=_G.owner_redraws,packets=_G.overlay_packets}))'))
+        self.assertGreater(counts['packets'], 0, 'tmux native rows still require overlay repair')
+        self.assertEqual(self.lua('print(_G.foreign_repairs)'), '0',
+                         'foreign-only redraws queued a redundant after-flush overlay repair')
+        self.assertTrue(frames, 'no streaming redraw frames were sampled')
+        self.assertTrue(all(not missing for missing in frames), frames)
+        # A full TUI invalidation can still expose its own intermediate frame,
+        # including with the old unconditional repair. Require final recovery.
+        self.lua("vim.api.nvim_set_hl(0,'Normal',{fg=0xe2e2e2,bg=0x111111}); vim.cmd('redraw!')")
+        self.pump(.15)
+        for label in labels:
+            self.assertIn(label, self.scaled_text())
+
+    def test_rapid_scroll_keeps_fully_visible_heading_frames(self):
+        self.tmux('set-option', '-g', 'allow-passthrough', 'on')
+        lines = ['prefix ' + str(i) for i in range(16)] + ['# FIRST', '', '## SECOND', '']
+        lines += ['tail ' + str(i) for i in range(13)] + ['### DISTANT', '']
+        lines += ['tail ' + str(i) for i in range(80)]
+        self.render(lines)
+        self.lua("vim.env.KITTY_WINDOW_ID='1'; vim.wo.smoothscroll=true; "
+                 "require('inkstone.core.manager').init(); "
+                 "require('inkstone.api').render({buf=vim.api.nvim_get_current_buf()}); vim.wait(200)")
+        self.pump(.2)
+        self.lua("local t=require('inkstone.core.typography'); local erase=t.erase; _G.scroll_erases=0; "
+                 "t.erase=function(matches) for _,r in ipairs(t.drawn) do "
+                 "if (not matches or matches(r)) and (r.payload:find('FIRST',1,true) or r.payload:find('SECOND',1,true)) "
+                 "then _G.scroll_erases=_G.scroll_erases+1 end end; return erase(matches) end")
+        frames = []
+
+        def observe():
+            text = self.scaled_text()
+            frames.append([label for label in ('FIRST', 'SECOND') if label not in text])
+
+        self.frame_observer = observe
+        for _ in range(8):
+            for key in ('12<C-e>', '12<C-y>'):
+                self.lua('vim.api.nvim_input(' + json.dumps(key) + ')')
+                self.pump(.025)
+                self.assert_ascii_cells_outside_typography()
+        self.frame_observer = None
+        self.assertTrue(frames, 'no scroll redraw frames were sampled')
+        self.assertTrue(all(not missing for missing in frames), frames)
+        self.assertEqual(self.lua('print(_G.scroll_erases)'), '0',
+                         'scrolling retired headings whose content did not change')
+        for key in ('18<C-e>', '2<C-e>', '18<C-y>', '2<C-y>', '<C-f>', '<C-b>'):
+            self.lua('vim.api.nvim_input(' + json.dumps(key) + ')')
+            self.pump(.05)
+            self.assert_ascii_cells_outside_typography()
+        self.assert_source()
+        self.render(['word ' * 200, '', '# FIRST', '', '## SECOND', '', 'AFTER'])
+        for _ in range(4):
+            for key in ('2<C-e>', '2<C-y>'):
+                self.lua('vim.api.nvim_input(' + json.dumps(key) + ')')
+                self.pump(.03)
+                if key == '2<C-e>':
+                    self.assertEqual(self.lua('print(vim.fn.winsaveview().skipcol>0)'), 'true')
+                self.assert_ascii_cells_outside_typography()
+                for label in ('FIRST', 'SECOND'):
+                    self.assertIn(label, self.scaled_text())
         self.assert_source()
 
     def test_native_redraw_frames_keep_all_heading_sizes(self):

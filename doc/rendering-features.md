@@ -345,8 +345,12 @@ buffer is edited.
 Inactive buffers use normal-mode rendering; scratch-local Insert mode and
 decoration refreshes do not remove background row reservations. Covered glyphs
 stay hidden until the popup moves or closes. At the end of each Neovim redraw,
-visible sized text is replayed before the terminal frame commits, with an
-additional coalesced repair after the native flush. Under tmux, native row
+visible sized text is replayed before the terminal frame commits. Owner redraws,
+changed text/colors and unclassified redraws retain an additional coalesced
+repair after the native flush; ordinary updates confined to a different split
+skip that duplicate repair. Scrolling discards old screen-coordinate ownership
+without erasing the newly exposed body, and collecting a distant heading keeps
+unchanged visible headings intact. Under tmux, native row
 output is flushed before the text passthrough so the frame includes both.
 Visibility checks do not flush a partially assembled Neovim frame.
 A float sharing

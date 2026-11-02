@@ -8,6 +8,7 @@ local cursorline_windows = {}
 local cursorline_extmark_windows = {}
 local sync_recovery
 local redrawing = false
+local foreign_redraw, owner_redraw = false, false
 local function kitty()
     return vim.env.KITTY_WINDOW_ID ~= nil or vim.env.TERM_PROGRAM == 'kitty'
 end
@@ -516,8 +517,9 @@ local function erase_redraw_hazards(covers)
 end
 
 local function window_geometry(win, info, top)
+    local view = require('inkstone.lib.env').win.view(win)
     return { top or info.topline - 1, vim.api.nvim_win_get_position(win),
-        vim.api.nvim_win_get_width(win), vim.api.nvim_win_get_height(win), info.textoff }
+        vim.api.nvim_win_get_width(win), vim.api.nvim_win_get_height(win), info.textoff, view.topfill, view.skipcol }
 end
 
 function M.paint(force, flush_tmux)
@@ -526,6 +528,7 @@ function M.paint(force, flush_tmux)
         or M.tmux.visible == false or M.capability ~= true then return end
     M.painting = true
     local out, regions, retained, wanted, previous, covers = {}, {}, {}, {}, {}, blockers()
+    local changed_any = false
     for _, rect in ipairs(M.drawn) do previous[rect.key] = rect end
     for buf, state in pairs(M.active) do
         if vim.api.nvim_buf_is_valid(buf) and vim.api.nvim_buf_get_changedtick(buf) == state.tick
@@ -544,7 +547,7 @@ function M.paint(force, flush_tmux)
                 for i, line in ipairs(entry.lines) do
                     local row, col = pos.row + (i - 1) * entry.spec.scale, pos.col
                     local width = math.max(line.width, entry.erase_width or 0)
-                    local rect = { key = buf .. ':' .. entry.id .. ':' .. i, buf = buf, win = win,
+                    local rect = { key = buf .. ':' .. entry.id .. ':' .. i, entry_id = entry.id, buf = buf, win = win,
                         screen_row = row, screen_col = col, height = entry.spec.scale, width = width,
                         row = row + M.tmux.top, col = col + M.tmux.left }
                     if pos.row > 0 and row >= top and row + entry.spec.scale - 1 <= bottom
@@ -594,6 +597,7 @@ function M.paint(force, flush_tmux)
     for _, rect in ipairs(regions) do
         local old = previous[rect.key]
         local changed = not old or old.payload ~= rect.payload or old.width ~= rect.width
+        changed_any = changed_any or changed
         local recover = force == 'recovery' and M.active[rect.buf].recovery
         if force == true or recover or changed then
             out[#out + 1] = rect.payload
@@ -604,6 +608,7 @@ function M.paint(force, flush_tmux)
         send('\27' .. '7' .. table.concat(out) .. '\27[0m\27' .. '8', flush_tmux)
     end
     M.painting = false
+    return changed_any
 end
 
 function M.schedule(force)
@@ -686,6 +691,7 @@ local function start()
             if not next(M.active) and #M.drawn == 0 then return false end
             if needs_visibility_check() then background_visible() end
             redrawing = true
+            foreign_redraw, owner_redraw = false, false
             -- Retired placements must leave before the new window's native
             -- text is drawn; erasing them in a scheduled paint is too late.
             erase_matches(function(rect)
@@ -695,23 +701,38 @@ local function start()
             end)
             erase_redraw_hazards(blockers())
         end,
+        on_buf = function(_, buf)
+            if not M.active[buf] then foreign_redraw = true end
+        end,
         on_win = function(_, win, buf, top)
             local state = M.active[buf]
             if not state or state.win ~= win then
-                if #M.drawn > 0 and vim.api.nvim_win_get_config(win).relative ~= '' then erase_covered({ float_rect(win) }) end
+                if vim.api.nvim_win_get_config(win).relative == '' then foreign_redraw = true
+                elseif #M.drawn > 0 then erase_covered({ float_rect(win) }) end
                 return false
             end
+            owner_redraw = true
             local info = vim.fn.getwininfo(win)[1]
             local geometry = window_geometry(win, info, top)
             if not vim.deep_equal(state.geometry, geometry) or vim.api.nvim_buf_get_changedtick(buf) ~= state.tick then
                 local old = state.geometry
-                local same_origin = old and old[1] == geometry[1] and vim.deep_equal(old[2], geometry[2])
+                local same_origin = old and vim.deep_equal(old[2], geometry[2])
                     and old[3] == geometry[3] and old[5] == geometry[5]
                     and vim.api.nvim_buf_get_changedtick(buf) == state.tick
-                erase_matches(function(rect)
-                    return rect.win == win and (not same_origin or rect.screen_row < info.winrow
-                        or rect.screen_row + rect.height > info.winrow + info.height)
-                end)
+                if same_origin and (old[1] ~= geometry[1] or old[6] ~= geometry[6] or old[7] ~= geometry[7]) then
+                    -- Native scrolling moves/replaces these cells. Their old
+                    -- screen positions no longer own an erase after the scroll.
+                    local retained = {}
+                    for _, rect in ipairs(M.drawn) do
+                        if rect.win ~= win then retained[#retained + 1] = rect end
+                    end
+                    M.drawn = retained
+                else
+                    erase_matches(function(rect)
+                        return rect.win == win and (not same_origin or rect.screen_row < info.winrow
+                            or rect.screen_row + rect.height > info.winrow + info.height)
+                    end)
+                end
                 state.geometry = geometry
             end
             return true
@@ -723,12 +744,14 @@ local function start()
         -- tmux's delayed native rows and recreate the lower-row cursor skip.
         on_end = function()
             if not redrawing then return end
-            local ok, err = pcall(M.paint, true, true)
+            local ok, changed = pcall(M.paint, true, true)
             redrawing = false
-            if not ok then error(err) end
+            if not ok then error(changed) end
             -- Full TUI invalidations (for example default color changes)
             -- can still emit cells after on_end. Retain a coalesced repair.
-            M.schedule(true)
+            -- Routine sibling updates already received the in-frame replay;
+            -- they do not also need a second copy of an unchanged payload.
+            if owner_redraw or not foreign_redraw or changed then M.schedule(true) end
         end,
     })
     M.timer = vim.uv.new_timer()
@@ -765,8 +788,17 @@ function M.update(context, extmarks)
     end
     local previous = M.active[context.buf]
     local tick = vim.api.nvim_buf_get_changedtick(context.buf)
-    if previous and (previous.win ~= context.win or previous.tick ~= tick or not vim.deep_equal(previous.entries, entries)) then
-        M.erase(function(rect) return rect.buf == context.buf end)
+    if previous and previous.win ~= context.win then
+        erase_matches(function(rect) return rect.buf == context.buf end)
+    elseif previous and (previous.tick ~= tick or not vim.deep_equal(previous.entries, entries)) then
+        local current, retired = {}, {}
+        for _, entry in ipairs(entries) do current[entry.id] = entry end
+        for _, entry in ipairs(previous.entries) do
+            if not vim.deep_equal(entry, current[entry.id]) then retired[entry.id] = true end
+        end
+        -- A viewport refresh can add distant entries without changing any
+        -- visible heading. Keep those glyphs instead of blanking the buffer.
+        erase_matches(function(rect) return rect.buf == context.buf and retired[rect.entry_id] end)
     end
     M.active[context.buf] = { win = context.win, tick = tick, entries = entries,
         recovery = context.config.typography.recovery,

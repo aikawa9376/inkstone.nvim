@@ -442,8 +442,15 @@ or configures tmux. Each drawn line retains its buffer/window/entry ownership,
 native and tmux-adjusted bounds, and output payload. The painter compares
 placement ownership independently, so a redraw in one place does not erase
 every heading. Clearing an unrelated buffer is
-a no-op for placements. Changed geometry/content/entry sets erase only owned
-extents before native redraw. Command-line height changes preserve still-visible
+a no-op for placements. Changed content retires only entries whose IDs vanished
+or whose display data changed; viewport collection of a distant heading does
+not erase unchanged headings. Origin/width changes erase owned extents before
+native redraw. On a pure scroll, native scrolling moves/replaces the cells;
+old screen coordinates are forgotten without sending an erase into newly
+exposed body text, and current placements are replayed at the new positions.
+The viewport snapshot includes topline, topfill and skipcol, so scrolling within
+one wrapped source row or virtual filler follows the same ownership rule.
+Command-line height changes preserve still-visible
 lines when their origin and width are unchanged. Pre-draw erases target actually
 occluded lines and lower-row float hazards while retaining unrelated placements.
 Floating window positions are zero-based outer corners; convert them to the
@@ -452,7 +459,13 @@ Their bounds include only nonempty border sides returned by the window config.
 Otherwise a popup's bottom/right border can be repainted by enlarged glyphs,
 while borderless floats can incorrectly suppress adjacent headings.
 Every Neovim redraw replays visible, uncovered placements in the provider's
-`on_end`, then schedules one coalesced repair after the native grid flush.
+`on_end`. Owned-window redraws, changed placement payloads and redraws with no
+identified foreign window also schedule one coalesced repair after the native
+grid flush. A routine foreign-buffer/split redraw with unchanged placements
+needs the in-frame replay but skips that duplicate repair. Decoration-provider
+`on_buf`/`on_win` callbacks classify only this second pass; they never suppress
+the global in-frame replay. tmux can repaint a complete terminal row and erase
+an unchanged heading even when its window received no native redraw callback.
 For tmux, the in-frame replay first sends a native (unwrapped) `CSI ? 2026 l`.
 This flushes the pane's collected native rows before the OSC 66 passthrough;
 tmux's own terminal synchronized update then commits both together. Sending
@@ -466,12 +479,22 @@ multicells with identical blank cells, including composed/virtual rows without
 an owned source-row callback. Equal screenstring/screenattr snapshots therefore
 cannot prove the terminal overlay survived. Production painting keeps neither
 cell snapshots nor per-source-row damage keys: both add work without allowing
-any redraw repair to be skipped. Tests read the native grid directly when
+the in-frame redraw repair to be skipped. Tests read the native grid directly when
 verifying blank reservations. Explicit recovery uses `schedule(true)`.
 Idle typography does not replay text by default, including fractional
 H2/H3 sizes. Periodic replays are observable output even without explicit erases;
 final multicell metadata alone does not establish that intermediate GPU frames
 are stable.
+
+`tests/terminal_compat.py` covers 40 rapid foreign-split updates, unchanged
+heading content across viewport entry-set changes, clipped/page-scroll cleanup
+and ASCII body cells outside placements. The driver pumps PTY output while RPC
+is pending and feeds the terminal parser at synchronized-frame boundaries,
+avoiding output backpressure and per-byte parsing overhead. A simultaneous
+Normal-color/full-screen invalidation in a streaming split exposed an
+intermediate empty frame with both the former unconditional repair and the
+current painter; final recovery is verified separately for that case. These
+tests establish terminal cell state, not universal GPU flicker elimination.
 
 Passthrough permission alone is not visibility: `allow-passthrough=all` also
 forwards output from hidden panes into the attached client's current view.
