@@ -1263,6 +1263,35 @@ class TerminalTests(unittest.TestCase):
                     self.assertIn(label, self.scaled_text())
         self.assert_source()
 
+    def test_focus_redraw_does_not_wait_for_async_tmux_visibility(self):
+        self.tmux('set-option', '-g', 'allow-passthrough', 'on')
+        self.tmux('set-option', '-g', 'focus-events', 'on')
+        self.render(['BEFORE', '', '# FIRST', '', '## SECOND', '', '### THIRD', '', 'BODY'])
+        self.lua("vim.env.KITTY_WINDOW_ID='1'; vim.api.nvim_win_set_cursor(0,{9,0}); "
+                 "require('inkstone.api').render({buf=vim.api.nvim_get_current_buf()}); vim.wait(200)")
+        self.pump(.2)
+        labels, frames = ('FIRST', 'SECOND', 'THIRD'), []
+
+        def observe():
+            text = self.scaled_text()
+            frames.append([label for label in labels if label not in text])
+
+        self.frame_observer = observe
+        # Hold only the async geometry query. A redraw must still validate
+        # visibility and repair its native blanks before that reply arrives.
+        self.lua("local system=vim.system; vim.system=function(args,opts,callback) "
+                 "if args[1]=='tmux' and args[#args]:find('#{pane_top}',1,true) then "
+                 "return system(args,opts,function(result) vim.defer_fn(function() callback(result) end,200) end) "
+                 "end; return system(args,opts,callback) end; "
+                 "vim.api.nvim_exec_autocmds('FocusGained',{}); "
+                 "vim.api.nvim_set_hl(0,'CursorLine',{bg=0x334455}); "
+                 "vim.api.nvim_win_set_cursor(0,{3,0}); vim.wo.cursorline=true; vim.cmd('redraw')")
+        self.pump(.35)
+        self.frame_observer = None
+        self.assertTrue(frames, 'no focus redraw frames were sampled')
+        self.assertTrue(all(not missing for missing in frames), frames)
+        self.assert_source()
+
     def test_native_redraw_frames_keep_all_heading_sizes(self):
         self.tmux('set-option', '-g', 'allow-passthrough', 'on')
         self.render(['BEFORE', '', '# FIRST', '', '## SECOND', '', '### THIRD', '', 'BODY'])

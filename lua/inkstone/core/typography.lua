@@ -689,7 +689,10 @@ local function start()
     vim.api.nvim_set_decoration_provider(ns, {
         on_start = function()
             if not next(M.active) and #M.drawn == 0 then return false end
-            if needs_visibility_check() then background_visible() end
+            -- FocusGained can redraw before its async tmux query returns.
+            -- Validate here as well: keeping paint suspended would commit
+            -- the native reservation blanks until that later reply arrives.
+            if needs_visibility_check() or (M.suspended and vim.env.TMUX) then background_visible() end
             redrawing = true
             foreign_redraw, owner_redraw = false, false
             -- Retired placements must leave before the new window's native
@@ -833,7 +836,12 @@ vim.api.nvim_create_autocmd('BufWipeout', { group = group, callback = function(a
 end })
 vim.api.nvim_create_autocmd({ 'FocusLost', 'FocusGained' }, { group = group, callback = function(args)
     M.focused = args.event == 'FocusGained'
-    M.check_visibility()
+    if vim.env.TMUX then M.check_visibility()
+    elseif M.focused then
+        -- Focus does not move terminal cells. Keep placement ownership and
+        -- replay in place in case another focus handler redrew the screen.
+        M.schedule(true)
+    end
 end })
 vim.api.nvim_create_autocmd('BufWinLeave', { group = group, callback = function(args)
     local win = vim.api.nvim_get_current_win()
@@ -848,8 +856,7 @@ vim.api.nvim_create_autocmd({ 'CursorMoved', 'CursorMovedI', 'BufEnter', 'WinEnt
     M.sync_cursorline()
     sync_recovery()
 end })
-vim.api.nvim_create_autocmd({ 'VimResized', 'FocusGained' }, { group = group, callback = function(args)
-    if args.event == 'FocusGained' and vim.env.TMUX then return end
+vim.api.nvim_create_autocmd('VimResized', { group = group, callback = function()
     if not next(M.active) and not M.probing and not next(M.waiters or {}) then return end
     M.erase(); M.tmux = nil
     M.refresh_tmux(function() M.schedule() end)

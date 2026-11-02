@@ -647,6 +647,38 @@ return function(test, equal, buffer)
         vim.env.TMUX, typography.tmux, typography.capability, vim.api.nvim_ui_send = tmux, cached, capability, send
     end)
 
+    test('direct-terminal focus replays without erasing or resetting terminal geometry', function()
+        local typography = require('inkstone.core.typography')
+        local tmux, active, drawn, cached = vim.env.TMUX, typography.active, typography.drawn, typography.tmux
+        local erase, refresh, schedule = typography.erase, typography.refresh_tmux, typography.schedule
+        local focused = typography.focused
+        vim.env.TMUX = nil
+        local buf = vim.api.nvim_get_current_buf()
+        typography.active = { [buf] = { win = vim.api.nvim_get_current_win() } }
+        local rect = { row = 3, col = 1, width = 10 }
+        typography.drawn, typography.tmux = { rect }, { top = 0, left = 0, allowed = true }
+        local erases, queries, replays = 0, 0, {}
+        typography.erase = function() erases = erases + 1 end
+        typography.refresh_tmux = function() queries = queries + 1 end
+        typography.schedule = function(force) replays[#replays + 1] = force end
+        for _ = 1, 3 do
+            vim.api.nvim_exec_autocmds('FocusLost', { group = 'InkstoneTypography' })
+            equal(typography.focused, false)
+            vim.api.nvim_exec_autocmds('FocusGained', { group = 'InkstoneTypography' })
+            equal(typography.focused, true)
+        end
+        equal(erases, 0)
+        equal(queries, 0)
+        equal(replays, { true, true, true })
+        assert(typography.drawn[1] == rect)
+        -- Actual resize still retires the old screen coordinates.
+        vim.api.nvim_exec_autocmds('VimResized', { group = 'InkstoneTypography' })
+        equal({ erases, queries }, { 1, 1 })
+        vim.env.TMUX, typography.active, typography.drawn, typography.tmux = tmux, active, drawn, cached
+        typography.erase, typography.refresh_tmux, typography.schedule = erase, refresh, schedule
+        typography.focused = focused
+    end)
+
     test('tmux focus changes wait for a fresh visibility snapshot', function()
         local typography = require('inkstone.core.typography')
         local system, tmux = vim.system, vim.env.TMUX

@@ -518,7 +518,13 @@ draws. Late paint never clears over the popup itself.
 Queued geometry callbacks wait for
 a fresh snapshot if focus changes during an in-flight query. Hidden recovery
 timers stop, and FocusGained restores visible placements without changing tmux
-options. Without focus notifications, the next native redraw restores them.
+options. If a native redraw starts while the asynchronous focus query is still
+pending, `on_start` checks visibility with the non-flushing bounded query and
+allows the same frame's overlay repair. Waiting for the asynchronous reply
+would commit blank reservations during focus-time highlights or animations.
+The delayed-query terminal regression checks this ordering; hidden-pane tests
+retain the no-output guarantee. Without focus notifications, the next native
+redraw restores placements.
 
 With updated auto-cursorline.nvim, `sync_cursorline` temporarily owns
 `w:auto_cursorline_disabled` while the cursor is on a shown typography range.
@@ -543,6 +549,19 @@ draws. The provider also prunes invalid owners before native drawing starts.
 Erasing an obsolete placement only in a scheduled paint is too late: its old
 coordinates can already contain another buffer's text. Ordinary focus changes
 between still-visible windows retain the source window's owned placement.
+Outside tmux, FocusGained forces an in-place replay without erasing placements
+or invalidating terminal capability/geometry. Only VimResized retires those
+coordinates and refreshes geometry. Under tmux, focus still requires the
+visibility check above to protect the destination pane.
+Focus handlers that change the global Normal background can invalidate the
+entire native TUI, including after the provider replay. These full-screen
+invalidations retain the same intermediate-frame limitation as other default
+color changes; removing the direct-terminal erase does not eliminate that case.
+Configurations can reduce this damage by keeping the global Normal background
+unchanged and suppressing focus animations while sized text is active in any
+window of the current tab. Inspect only already-loaded typography state so
+focus events do not initialize a Markdown renderer. Inactive tabs, stale window
+owners and disabled typography should retain ordinary focus behavior.
 
 Redraw replays reissue multicells without a preceding glyph erase;
 only obsolete extents and trailing reserved cells need explicit clearing.
