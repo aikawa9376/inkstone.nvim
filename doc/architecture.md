@@ -201,22 +201,22 @@ fence (retaining any container prefix), so language overlays and code padding
 cannot cover the collapse indicator. It remains visible at the cursor during
 rendering; raw/Visual mode still follows the normal render-mode policy.
 Triangles stay left (`▶` closed / `▼` expanded) on details and callouts, and on
-collapsed code. `folds.position` defaults to `right`: a separate `right_align`
-extmark shows `N lines`; details/callouts retain it when expanded. Expanded code
-receives no fold glyph, count or additional header padding. Metadata and callout triangles use
-priority 5001, above Neovim's default 4096 virtual-text priority; a lower priority
-would let full-width language borders or quote markers cover the controls.
-Collapsed titles reserve space for the triangle and count, preserving native
-right alignment through resizing and gutters. `folds.right_pad` defaults to
-three cells appended to right-aligned chunks: floating scrollbar windows are
-composited above all extmarks and can cover the last letters regardless of
-metadata priority. This is distinct from renderer-overlay priority conflicts.
+collapsed code. `folds.position` defaults to `right`: `N lines` is appended to
+the displayed summary/language label with exactly one space, in the same overlay
+chunks as that label. It does not align to the window edge. Details/callouts
+retain counts when expanded. Expanded code receives no fold glyph, count or
+additional header padding. Callout count overlays and triangles use priority
+5001, above Neovim's default 4096 virtual-text priority, so quote markers do not
+cover the controls. Detail/collapsed-code counts share their header overlay.
+Titles reserve space for the triangle and count when clipping to a narrow
+window. Callout count overlays use the rendered title's endpoint as their
+window column, since concealed-source EOL can precede the displayed title end.
+No window-edge metadata or right-edge padding option is used.
 `core/colors.lua:fold_icon` derives `InkstoneFoldIcon` from resolved Comment
 attributes with GUI/cterm italic disabled, refreshing it on ColorScheme or a
 changed source definition without altering the shared Comment group.
 `position=left` uses `▶/▼ N lines · title/language`; callout counts follow their
-displayed overlay title, with the window column computed from rendered widths
-to avoid overwriting the title at concealed-source EOL. N counts source rows
+displayed title with a separator. N counts source rows
 after the opening row, including summary/blank lines and closing tags.
 Explicitly reopened code retains its ordinary opening-row renderer marks under
 anti-conceal at the cursor. Untoggled code follows normal anti-conceal policy.

@@ -19,12 +19,11 @@ M.typography = {
 ---@field callout boolean
 ---@field details boolean
 ---@field position 'left'|'right'
----@field right_pad integer
 M.folds = {
-    default = { enabled = true, render_modes = false, code = true, callout = true, details = true, position = 'right', right_pad = 3 },
+    default = { enabled = true, render_modes = false, code = true, callout = true, details = true, position = 'right' },
     schema = function()
         return M.base.schema({ code = { type = 'boolean' }, callout = { type = 'boolean' }, details = { type = 'boolean' },
-            position = { enum = { left = 'left', right = 'right' } }, right_pad = { type = 'number' } })
+            position = { enum = { left = 'left', right = 'right' } } })
     end,
 }
 

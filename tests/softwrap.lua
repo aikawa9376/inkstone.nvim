@@ -292,7 +292,7 @@ return function(test, equal)
                             assert(icon < label, 'fold triangle must remain on the left: ' .. line)
                             if position == 'right' then
                                 assert(info > label, 'right fold information covered its title: ' .. line)
-                                assert(vim.fn.strdisplaywidth(line) == width - 3, 'fold information did not reserve scrollbar space: ' .. line)
+                                assert(info == label + #title + 1, 'fold count must follow its title by exactly one space: ' .. line)
                             elseif title ~= 'Note' then assert(info < label, 'left fold information lost its prefix: ' .. line) end
                         end
                     end

@@ -173,31 +173,26 @@ function M.apply(context, parser, marks)
     end
     local function fold_info(block, closed)
         local value = count(block)
-        if config.position == 'right' then value = value .. string.rep(' ', math.max(0, math.floor(config.right_pad or 3))) end
-        local opts = { virt_text_pos = config.position == 'right' and 'right_align' or 'eol',
-            virt_text = { { config.position == 'right' and value or ' · ' .. value, 'Comment' } },
+        local opts = { virt_text_pos = 'overlay',
+            virt_text = { { (config.position == 'right' and ' ' or ' · ') .. value, 'Comment' } },
             -- Renderer virtual text uses Neovim's default priority (4096).
             -- Controls must remain above language borders and quote markers.
             priority = 5001, hl_mode = 'combine' }
-        if config.position == 'left' then
-            -- A callout title overlay can extend beyond the concealed source
-            -- EOL. Place its count after the displayed title, not over it.
-            local first = vim.api.nvim_buf_get_lines(context.buf, block.start_row, block.start_row + 1, false)[1] or ''
-            local function width(col)
-                return context:width({ start_row = block.start_row, start_col = 0, end_col = col, text = first:sub(1, col) })
-            end
-            local column = width(#first)
-            for _, mark in ipairs(marks) do
-                if mark.start_row == block.start_row and mark.opts.virt_text_pos == 'overlay' then
-                    column = math.max(column, width(mark.start_col) + str.line_width(mark.opts.virt_text))
-                end
-            end
-            opts.virt_text_win_col = column
+        -- Use the displayed callout title rather than the raw marker's EOL.
+        local first = vim.api.nvim_buf_get_lines(context.buf, block.start_row, block.start_row + 1, false)[1] or ''
+        local function width(col)
+            return context:width({ start_row = block.start_row, start_col = 0, end_col = col, text = first:sub(1, col) })
         end
+        local column
+        for _, mark in ipairs(marks) do
+            if mark.start_row == block.start_row and mark.conceal == 'callout' and mark.opts.virt_text_pos == 'overlay' then
+                column = math.max(column or 0, width(mark.start_col) + str.line_width(mark.opts.virt_text))
+            end
+        end
+        opts.virt_text_win_col = column or width(#first)
         add(block.start_row, opts)
         extra[#extra].conceal = false
         extra[#extra].folded = closed
-        return str.width(value)
     end
     local function title(value, reserved, col)
         local width = math.max(0, context:window_width() - reserved - (col or 0) - 1)
@@ -225,7 +220,9 @@ function M.apply(context, parser, marks)
                     { ' · ' .. block.title, 'InkstoneDetailsHeader' },
                 }
                 if config.position == 'right' then
-                    label = { { icon, icon_hl }, { title(block.title, fold_info(block, closed) + str.width(icon)), 'InkstoneDetailsHeader' } }
+                    label = { { icon, icon_hl },
+                        { title(block.title, str.width(count(block)) + str.width(icon)), 'InkstoneDetailsHeader' },
+                        { ' ' .. count(block), 'Comment' } }
                 end
                 local width = str.line_width(label)
                 local padding = math.max(0, vim.fn.strdisplaywidth(first) - width)
@@ -264,7 +261,8 @@ function M.apply(context, parser, marks)
                 if config.position == 'right' then
                     local prefix = str.width(first:sub(1, block.start_col or 0))
                     label = { { '▶ ', icon_hl },
-                        { title(language or 'Code', fold_info(block, true) + 2, prefix), context.config.code.highlight_fallback } }
+                        { title(language or 'Code', str.width(count(block)) + 2, prefix), context.config.code.highlight_fallback },
+                        { ' ' .. count(block), 'Comment' } }
                 end
                 local padding = math.max(0, str.width(first:sub((block.start_col or 0) + 1)) - str.line_width(label))
                 if padding > 0 then label[#label + 1] = { string.rep(' ', padding), context.config.code.highlight } end

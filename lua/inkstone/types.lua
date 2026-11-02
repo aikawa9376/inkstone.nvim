@@ -281,7 +281,6 @@
 
 ---@class (exact) render.md.folds.UserConfig: render.md.base.UserConfig
 ---@field position? 'left'|'right'
----@field right_pad? integer
 ---@field code? boolean
 ---@field callout? boolean
 ---@field details? boolean

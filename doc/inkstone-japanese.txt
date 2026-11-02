@@ -82,11 +82,11 @@ hidden child opens its collapsed parent first.
 Code folds inside details are independent and keep their state across parent
 close/reopen. Ctrl+i on code toggles code; use the details title for the parent.
 Fold triangles always stay left (▶ closed / ▼ open), beside title/language.
-folds.position='right' puts "N lines" on the right. Details/callouts retain counts
+folds.position='right' shows "▶ Summary N lines", with one space after the label.
+It follows the label rather than aligning to the window edge. Details/callouts retain counts
 in both states; code shows fold controls only while collapsed.
 Use folds.position='left' for "▶/▼ N lines · title/language".
 Callout counts use the same position; code.position controls ordinary code labels.
-folds.right_pad=3 reserves cells at the edge for floating scrollbars (0 is flush).
 InkstoneFoldIcon follows Comment colors with GUI/cterm italic disabled.
 Expanded code uses its ordinary language header; reopening retains decoration
 at the cursor. Newly visible

@@ -421,16 +421,14 @@ Code fences have independent fold state inside details. `Ctrl+i` on code folds
 the code; use the details title to fold the enclosing details. Reopening a
 parent preserves the children's states. `folds.position = 'right'` is the
 default: the triangle (`▶` closed / `▼` open) always stays on the left with
-the title or language name, while `N lines` is aligned to the window's right
-edge. Details and callouts retain counts in both states. Code shows fold
-information only while collapsed; expanded code keeps its original language
+the title or language name, while `N lines` immediately follows that label with
+one separating space, for example `▶ Summary 10 lines`. The position is relative
+to the label rather than the window edge. Details and callouts retain counts in
+both states. Code shows fold information only while collapsed; expanded code keeps its original language
 header without a triangle, count or additional header padding.
 N counts source rows after the opening row, including summary/blank lines and
-the closing tag. Long titles are clipped
-to leave space for the information; alignment follows window resizing and gutters.
-`folds.right_pad = 3` leaves three cells after right-aligned counts so floating
-scrollbars at the window edge do not cover their last letters. Increase this for
-a wider overlay, or use `0` to align counts flush with an unobstructed edge.
+the closing tag. Long titles are clipped to fit the label and count within the
+window, accounting for resizing and gutters.
 Triangle glyphs use `InkstoneFoldIcon`, derived from the theme's `Comment` color
 with italic disabled in both GUI and terminal styles; theme changes refresh it.
 

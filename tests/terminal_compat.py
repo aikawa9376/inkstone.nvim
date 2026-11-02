@@ -354,6 +354,7 @@ class TerminalTests(unittest.TestCase):
             header = str(self.screen.line(header_row))
             self.assertTrue(header.startswith('▼ Box'), header)
             self.assertTrue(header.rstrip().endswith('6 lines'), header)
+            self.assertIn('▼ Box 6 lines', header)
             self.assertFalse(self.screen.line(header_row).cursor_from(header.index('▼')).italic)
             self.assertEqual(self.screen.line(header_row).cursor_from(header.index('Box')).fg, (0xffcc00 << 8) | 2)
             body_row = next(row for row in range(24) if 'BODY' in str(self.screen.line(row)))
@@ -379,7 +380,7 @@ class TerminalTests(unittest.TestCase):
         self.pump(.2)
         check()
 
-    def test_fold_counts_avoid_scrollbars_and_expanded_code_keeps_its_label(self):
+    def test_fold_counts_follow_labels_and_expanded_code_keeps_its_label(self):
         for width in (120, 54):
             if width != 120:
                 fcntl.ioctl(self.fd, termios.TIOCSWINSZ, struct.pack('HHHH', 24, width, 0, 0))
@@ -407,7 +408,7 @@ class TerminalTests(unittest.TestCase):
                 if icon:
                     self.assertLess(line.index(icon), line.index(title), line)
                     self.assertIn(str(count) + ' lines', line, line)
-                    self.assertLessEqual(line.index(str(count) + ' lines') + len(str(count) + ' lines'), width - 3, line)
+                    self.assertIn(title + ' ' + str(count) + ' lines', line, line)
                     row = next(row for row in range(24) if title in str(self.screen.line(row)))
                     self.assertFalse(self.screen.line(row).cursor_from(line.index(icon)).italic)
                 else:
