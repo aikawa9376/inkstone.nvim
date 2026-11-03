@@ -293,12 +293,22 @@ still drains the pending reply before releasing this guard.
 require('inkstone').setup({
     typography = {
         enabled = 'auto', -- false disables; :Inkstone typography toggles this buffer
+        backend = 'text', -- 'image' opts into the experimental Rust rasterizer
         headings = { 2, 1.5, 1.25, 1, 1, 1 }, -- H1 through H6
         small = 0.8,
         recovery = false, -- true enables periodic recovery after external tmux redraws
     },
 })
 ```
+
+The optional image backend rasterizes headings with Rust/Pango/Cairo and places
+them through native Unicode image-placeholder extmarks. It does not require
+Snacks or use OSC 66 repair packets. Build with `make raster`, then follow
+[`native/README.md`](../native/README.md) for configuration and an isolated preview.
+The complete normal heading renderer stays visible until conversion succeeds;
+missing binaries and failed conversions retain that fallback. This prototype
+covers headings; inline small text retains ordinary rendering. Image pixels do
+not provide character-level search highlights or terminal text selection.
 
 Top-level headings reserve enough rows for their scaled text and wrap to the
 available width. Setext headings use the same H1 (`===`) and H2 (`---`) sizes

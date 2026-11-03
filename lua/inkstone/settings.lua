@@ -6,11 +6,19 @@ local M = {}
 ---@field headings number[]
 ---@field small number
 ---@field recovery boolean
+---@field backend 'text'|'image'
+---@field image table
 M.typography = {
-    default = { enabled = 'auto', headings = { 2, 1.5, 1.25, 1, 1, 1 }, small = .8, recovery = false },
+    default = { enabled = 'auto', backend = 'text', headings = { 2, 1.5, 1.25, 1, 1, 1 }, small = .8, recovery = false,
+        image = { command = { 'inkstone-raster' }, font = 'monospace', cell_width = 16, cell_height = 32,
+            timeout = 5000, cache_dir = vim.fn.stdpath('cache') .. '/inkstone/typography' } },
     schema = function()
         return { record = { enabled = { union = { { type = 'boolean' }, { enum = { 'auto' } } } },
-            headings = { list = { type = 'number' } }, small = { type = 'number' }, recovery = { type = 'boolean' } } }
+            backend = { enum = { text = 'text', image = 'image' } },
+            headings = { list = { type = 'number' } }, small = { type = 'number' }, recovery = { type = 'boolean' },
+            image = { record = { command = { list = { type = 'string' } }, font = { type = 'string' },
+                cell_width = { type = 'number' }, cell_height = { type = 'number' }, timeout = { type = 'number' },
+                cache_dir = { type = 'string' } } } } }
     end,
 }
 
@@ -839,6 +847,7 @@ M.handlers = {}
 ---@field buf integer
 ---@field root TSNode
 ---@field last boolean
+---@field seen? table<string, boolean> Captures shared across this language's roots in one render pass.
 
 ---@type table<string, render.md.Handler>
 M.handlers.default = {

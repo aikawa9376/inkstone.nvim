@@ -34,7 +34,14 @@ function M.parse(ctx)
     }
     local context = Context.get(ctx.buf)
     local marks = Marks.new(context, true)
+    local seen = ctx.seen or {}
     context.view:nodes(ctx.root, query, function(capture, node)
+        -- Different injected trees can capture the same source link. Claim it
+        -- before rendering updates inline widths/highlights, not after adding
+        -- duplicate extmarks. Distinct links on one row have distinct ranges.
+        local key = table.concat({ capture, node.type, node.start_row, node.start_col, node.end_row, node.end_col }, ':')
+        if seen[key] then return end
+        seen[key] = true
         local render = renders[capture]
         assert(render, ('unhandled inline capture: %s'):format(capture))
         render:execute(context, marks, node)

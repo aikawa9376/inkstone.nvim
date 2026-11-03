@@ -99,9 +99,16 @@ function M.check()
 
     M.start('Kitty typography (optional)')
     local typography = require('inkstone.core.typography')
+    if config.typography.enabled ~= false and config.typography.backend == 'image' then
+        local command = config.typography.image.command
+        if require('inkstone.core.typography_image').available(config.typography.image) then
+            vim.health.ok('experimental Rust image typography: ' .. table.concat(command, ' '))
+        else vim.health.warn('Build inkstone-raster (make raster) and configure typography.image.command; native headings remain visible') end
+        vim.health.info('Image headings use native placeholder cells; Snacks is not required')
+    end
     if config.typography.enabled == false then vim.health.ok('disabled')
-    elseif not vim.api.nvim_ui_send then vim.health.warn('OSC 66 needs Neovim 0.12+; normal text is retained')
-    elseif typography.capability == true then vim.health.ok('Kitty 0.40+ text sizing detected')
+    elseif not vim.api.nvim_ui_send then vim.health.warn('Typography needs Neovim 0.12+; normal text is retained')
+    elseif typography.capability == true then vim.health.ok('Kitty 0.40+ typography support detected')
     elseif vim.env.TMUX then
         vim.health.info('Kitty 0.40+ not found in tmux client_termtype; normal text is the fallback')
     else vim.health.info('Waiting for a Kitty 0.40+ XTVERSION reply; normal text is the fallback') end

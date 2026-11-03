@@ -20,7 +20,7 @@ local function sgr(value)
     return table.concat(out)
 end
 
-function M.new(win)
+function M.new(win, raw)
     local namespace = vim.api.nvim_get_hl_ns({ winid = win })
     if namespace < 0 then namespace = math.max(0, vim.api.nvim_get_hl_ns({})) end
     local aliases, groups, sequences = {}, {}, {}
@@ -60,7 +60,7 @@ function M.new(win)
             if value.nocombine then result = vim.tbl_extend('force', {}, normal) end
             for k, v in pairs(value) do result[k] = v end
         end
-        sequences[key] = sgr(result)
+        sequences[key] = raw and result or sgr(result)
         return sequences[key]
     end
 end

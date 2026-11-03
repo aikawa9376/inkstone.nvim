@@ -1,6 +1,6 @@
 NVIM ?= nvim
 
-.PHONY: test unit upstream bench reference terminal
+.PHONY: test unit upstream bench reference terminal raster raster-test
 
 test:
 	$(NVIM) --headless --clean -u NONE -l tests/run.lua
@@ -19,3 +19,9 @@ reference:
 
 terminal:
 	kitty +runpy 'import runpy; runpy.run_path("tests/terminal_compat.py", run_name="__main__")'
+
+raster:
+	cargo build --locked --release --manifest-path native/Cargo.toml
+
+raster-test:
+	cargo test --locked --manifest-path native/Cargo.toml

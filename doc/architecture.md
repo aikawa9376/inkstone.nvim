@@ -200,6 +200,16 @@ splitting virtual highlight chunks into visible invalid-byte placeholders and
 inflating measured widths. Captures spanning disjoint views are deduplicated,
 and source line reads remain bounded to the visible ranges.
 
+Inline render captures are also deduplicated before producing marks or updating
+inline widths/highlights. `core/handlers.lua` shares a capture set across all
+roots of one language in a render pass; `handler/markdown_inline.lua` keys it by
+capture, node type and source byte range. Overlapping injected trees can expose
+the same source link with different node IDs. Node IDs or row-only keys cannot
+identify logical links: a row with two distinct links must retain two icons.
+The set is local to the pass, so later edits and refreshes render normally.
+This complements parser-side injection guards and covers disjoint-view repeats;
+deduplicating final extmarks alone would leave inflated inline width state.
+
 Replacement chunks also carry persistent foreign extmark range highlights,
 including LazyAgent transcript role colors. `Highlights:extmarks` queries only
 visible ranges with overlap enabled, clips multiline byte ranges per row, and
@@ -595,6 +605,62 @@ The source bytes and normal grid remain authoritative. This is a scoped
 terminal overlay, not a replacement Neovim TUI, and brief fallback/flicker during
 unrelated redraws is possible. `doc/rendering-features.md` owns configuration,
 eligibility and user-facing limits; `demo/rich.md` is the interactive sample.
+
+## Experimental image typography
+
+The opt-in `typography.backend='image'` reuses heading collection, source
+restoration and shared-buffer fallback. `typography_image.layout` wraps native
+display units with the existing Japanese/word-boundary layout, using the scaled
+width budget. It retains whole style spans with fractional advances and rounds
+only the final placeholder extent. OSC 66's seven-cell packet splitting and
+per-packet cell quantization must not be reused: those produced gaps inside
+`inkstone.nvim` and `必要なもの` in the photographed prototype. `core/typography_image.lua`
+owns per-buffer heading slots and refcounted content assets. The Rust helper in
+`native/` reads bounded JSON and returns PNG pixels using Pango/Cairo; it has no
+terminal output or source-file access. At most two conversion jobs run at once.
+Text/styles, font, raster cell dimensions, command and executable metadata key
+the disk cache. Obsolete slots cancel unshared work; late completions cannot
+upload or trigger a render after their owner is disposed. Errors retain the
+normal heading renderer, and PNG publication uses private temporary files.
+
+The Rust helper shapes each complete line with Pango attributes indexed by
+UTF-8 bytes, merging equivalent adjacent attributes. Subpixel font metrics and
+unrounded glyph positions set the base size. A single horizontal transform fits
+the terminal cell proportions; fallback-font width correction applies to the
+whole line. Native row reservations use ceil(ratio), while the font uses the
+actual ratio, so 1.25x/1.5x/2x remain visually distinct within two-row layouts.
+Rust pixel tests compare split versus unsplit words and actual ink bounds across
+ratios; image-presence tests alone do not establish spacing or size correctness.
+
+`lib/graphics.lua` is independent of Snacks and heading layout. It uploads PNGs
+as quiet Kitty graphics virtual placements and encodes full image IDs plus
+row/column indices into ordinary placeholder cells. Ready headings emit those
+cells in their inline and virtual-line extmarks. Normal redraw, scrolling,
+popup occlusion and tmux window switching move/clip the same cells. No OSC 66
+provider, idle repair, or image retransmission participates in their redraw.
+Per-image highlight IDs are restored if a colorscheme cleared them. Release
+deletes only exact owned image IDs; hidden uploads cannot place pixels on the
+destination pane because prototypes have no physical screen location.
+
+`typography.visible()` reports shown typography in valid windows of the current
+tab for either backend. Image ownership alone is insufficient: pending, failed
+and anti-concealed assets do not count. `typography_image.update` records the
+shown placeholder extmarks during reconciliation. Focus integrations can use
+this query to retain the existing Normal background and avoid focus animations.
+An OSC-only check misses image headings: changing Normal between transparent
+and opaque changes their resolved raster colors, invalidating the cache key and
+replacing/retransmitting the image on each focus transition.
+
+Image generation/display is optional and the default remains `backend='text'`.
+The capability gate conservatively retains Kitty 0.40+ and existing passthrough
+permission checks. Inline small spans keep ordinary rendering in this backend.
+Raster cell proportions are configurable; theme/style changes need a render.
+Image pixels do not expose terminal text selection or per-character search
+highlights. `native/README.md` owns setup, protocol limits and the isolated
+`demo/image-typography.lua` preview. `tests/image_typography.lua` checks pending/
+failed native fallback, cache reuse, cleanup and cancelled jobs. Image tests in
+`tests/terminal_compat.py` decode actual PNGs and resolve Kitty render layers at
+synchronized frame boundaries; these do not prove every GPU/compositor frame.
 
 ## LaTeX source ranges and converters
 

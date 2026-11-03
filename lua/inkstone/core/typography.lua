@@ -193,6 +193,8 @@ function M.supports(context)
     local wins = vim.fn.win_findbuf(context.buf)
     M.windows[context.buf] = wins
     if #wins > 1 then return false end
+    if context.config.typography.backend == 'image'
+        and not require('inkstone.core.typography_image').available(context.config.typography.image) then return false end
     M.waiters = M.waiters or {}
     if not M.tmux or (M.capability == nil and M.tmux.allowed) then M.waiters[context.buf] = context.win end
     if not M.tmux then
@@ -341,6 +343,7 @@ function M.heading(context, marks, node, data)
     local inline = content and content:child('inline')
     if not inline then return false end
     local lines, budget = {}, context:window_width()
+    local image = context.config.typography.backend == 'image' and require('inkstone.core.typography_image')
     -- Setext titles may contain multiple source lines. Resolve styles and
     -- inline replacements on each row, keeping their existing line breaks.
     for i, text in ipairs(vim.split(inline.text, '\n', { plain = true })) do
@@ -348,28 +351,45 @@ function M.heading(context, marks, node, data)
         local line = require('inkstone.lib.display').line(context, {
             start_row = row, end_row = row, start_col = col, end_col = col + #text, text = text,
         })
-        local current, width = {}, 0
-        for _, run in ipairs(M.runs(line, spec)) do
-            if run.width > budget then return false end
-            if width + run.width > budget then lines[#lines + 1] = { runs = current, width = width }; current, width = {}, 0 end
-            current[#current + 1], width = run, width + run.width
+        if image then
+            local wrapped = image.layout(line, spec, budget, context.config.paragraph.japanese)
+            if not wrapped then return false end
+            vim.list_extend(lines, wrapped)
+        else
+            local current, width = {}, 0
+            for _, run in ipairs(M.runs(line, spec)) do
+                if run.width > budget then return false end
+                if width + run.width > budget then lines[#lines + 1] = { runs = current, width = width }; current, width = {}, 0 end
+                current[#current + 1], width = run, width + run.width
+            end
+            if #current > 0 then lines[#lines + 1] = { runs = current, width = width } end
         end
-        if #current > 0 then lines[#lines + 1] = { runs = current, width = width } end
     end
     if #lines == 0 then return false end
     local last = node.end_row - (node.end_col == 0 and 1 or 0)
     local entry = { id = 'heading:' .. node.start_row, range = { node.start_row, last },
         row = node.start_row, col = 0, spec = spec, lines = lines, highlight = data.fg, background = data.bg }
+    local grid
+    if image then
+        grid = image.request(context, entry)
+        -- Keep the complete normal renderer until the PNG has been uploaded.
+        if not grid then return false end
+        entry.image = true
+    end
     context.typography[#context.typography + 1] = entry
     local first, virtual = #marks:get() + 1, {}
     local function chunks(at)
         local out = {}; for _, run in ipairs(at.runs) do out[#out + 1] = { run.text, run.highlight } end
         return reserve(out)
     end
-    marks:over(context.config.heading, true, node, { conceal = '', virt_text = chunks(lines[1]), virt_text_pos = 'inline' })
-    for i = 1, #lines do
-        if i > 1 then virtual[#virtual + 1] = chunks(lines[i]) end
-        for _ = 2, spec.scale do virtual[#virtual + 1] = {} end
+    marks:over(context.config.heading, true, node, { conceal = '', virt_text = grid and grid[1] or chunks(lines[1]), virt_text_pos = 'inline' })
+    if grid then
+        for i = 2, #grid do virtual[#virtual + 1] = grid[i] end
+    else
+        for i = 1, #lines do
+            if i > 1 then virtual[#virtual + 1] = chunks(lines[i]) end
+            for _ = 2, spec.scale do virtual[#virtual + 1] = {} end
+        end
     end
     if #virtual > 0 then marks:add(context.config.heading, true, node.start_row, 0, { virt_lines = virtual }) end
     if not data.atx then
@@ -388,6 +408,8 @@ function M.heading(context, marks, node, data)
 end
 
 function M.small(context, parser, marks)
+    -- This experiment covers headings; inline small text keeps native rendering.
+    if context.config.typography.backend == 'image' then return end
     if not M.supports(context) then return end
     local spec = M.spec(context.config.typography.small)
     if not spec then return end
@@ -760,7 +782,11 @@ local function start()
     M.timer = vim.uv.new_timer()
 end
 
-function M.clear(buf, keep_waiter)
+function M.clear(buf, keep_waiter, keep_images)
+    local images = package.loaded['inkstone.core.typography_image']
+    -- Custom on.clear callbacks rebuild extmarks within the same render.
+    -- Keep their in-flight/ready assets until image.update reconciles owners.
+    if images and not keep_images and not (buf and keep_waiter) then images.clear(buf) end
     if not buf then M.windows = {} elseif not keep_waiter then M.windows[buf] = nil end
     if buf and M.waiters and not keep_waiter then M.waiters[buf] = nil elseif not buf then M.waiters = {} end
     local painted = false
@@ -778,15 +804,40 @@ function M.clear(buf, keep_waiter)
     if painted then vim.schedule(function() if vim.v.dying == 0 then vim.cmd('redraw!') end end) end
 end
 
+-- Focus integrations need both backends, without treating pending or
+-- anti-concealed image assets as displayed typography or loading a renderer.
+function M.visible()
+    local tab = vim.api.nvim_get_current_tabpage()
+    local function current(buf, state)
+        local win = state.win
+        return vim.api.nvim_win_is_valid(win) and vim.api.nvim_win_get_tabpage(win) == tab
+            and vim.api.nvim_win_get_buf(win) == buf
+    end
+    for buf, state in pairs(M.active) do
+        if #state.entries > 0 and current(buf, state) then return true end
+    end
+    local images = package.loaded['inkstone.core.typography_image']
+    for buf, state in pairs(images and images.buffers or {}) do
+        if state.shown and current(buf, state) then return true end
+    end
+    return false
+end
+
 function M.update(context, extmarks)
     local shown, entries = {}, {}
     for _, extmark in ipairs(extmarks) do
         local mark = extmark:get()
         if extmark:shown() and mark.font_id then shown[mark.font_id] = true end
     end
-    for _, entry in ipairs(context.typography) do if shown[entry.id] then entries[#entries + 1] = entry end end
+    for _, entry in ipairs(context.typography) do
+        if not entry.image and shown[entry.id] then entries[#entries + 1] = entry end
+    end
+    local images = package.loaded['inkstone.core.typography_image']
+    if images then images.update(context, shown) end
     if #entries == 0 then
-        if M.active[context.buf] then M.clear(context.buf, context.config.typography.enabled ~= false) end
+        if M.active[context.buf] then
+            M.clear(context.buf, context.config.typography.enabled ~= false, true)
+        end
         return
     end
     local previous = M.active[context.buf]
