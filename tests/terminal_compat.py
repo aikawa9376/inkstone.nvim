@@ -1440,6 +1440,67 @@ class TerminalTests(unittest.TestCase):
         self.pump(.1)
         self.assertEqual(self.screen.grman.image_count, 0)
 
+    def test_image_typography_ignores_acp_streaming_in_another_buffer(self):
+        self.image_typography(['BEFORE', '', '# FIRST', '', '## SECOND', '', '### THIRD', '', 'BODY'])
+        self.lua("require('inkstone.core.manager').init(); _G.owner=vim.api.nvim_get_current_win(); "
+                 "vim.cmd('botright vnew'); _G.stream=vim.api.nvim_get_current_buf(); "
+                 "require('inkstone.state').get(_G.stream,{typography={enabled=false},debounce=0}); "
+                 "vim.treesitter.language.register('markdown','lazyagent_acp'); vim.bo.filetype='lazyagent_acp'; "
+                 "vim.treesitter.start(_G.stream,'markdown'); "
+                 "require('inkstone.api').render({buf=_G.stream}); vim.wait(150)")
+        self.pump(.15)
+        expected = {layer['image_id'] for layer in self.image_layers()}
+        self.assertEqual(len(expected), 3)
+        frames = []
+        self.frame_observer = lambda: frames.append({layer['image_id'] for layer in self.image_layers()})
+        self.output.clear()
+        self.lua("_G.stream_count=0; _G.stream_timer=vim.uv.new_timer(); "
+                 "_G.stream_timer:start(0,8,vim.schedule_wrap(function() "
+                 "if _G.stream_count>=40 then return end; _G.stream_count=_G.stream_count+1; "
+                 "vim.api.nvim_buf_set_lines(_G.stream,0,-1,false,{'# ACP reply','','**stream** '.._G.stream_count,'',"
+                 "'```lua','print('.._G.stream_count..')','```'}); "
+                 "require('inkstone.api').render({buf=_G.stream}); vim.cmd('redraw'); "
+                 "if _G.stream_count>=40 then _G.stream_timer:stop(); _G.stream_timer:close() end end))")
+        self.pump(.7)
+        self.frame_observer = None
+        self.assertEqual(self.lua('print(_G.stream_count)'), '40')
+        self.assertTrue(frames)
+        self.assertTrue(all(expected <= frame for frame in frames), frames)
+        self.assertNotIn(b'\x1b_G', self.output, 'ACP updates retransmitted or deleted another buffer image')
+        self.assertNotIn(b'\x1b]66;', self.output, 'ACP updates triggered text-overlay repair')
+
+    def test_image_typography_ignores_word_highlights_in_a_plain_scratch(self):
+        plugin = Path(os.environ.get('INKSTONE_ILLUMINATE_RTP', Path.home() / '.local/share/nvim/lazy/vim-illuminate'))
+        if not (plugin / 'lua/illuminate.lua').is_file():
+            self.skipTest('vim-illuminate is not installed')
+        self.image_typography(['BEFORE', '', '# FIRST', '', '## SECOND', '', 'BODY'])
+        self.lua("vim.cmd('botright vnew'); _G.scratch=vim.api.nvim_get_current_buf(); vim.bo.buftype='nofile'; "
+                 "vim.bo.filetype='text'; vim.api.nvim_buf_set_lines(0,0,-1,false,"
+                 "{'alpha beta alpha','beta gamma beta','gamma alpha gamma'}); "
+                 'vim.opt.rtp:append(' + json.dumps(str(plugin)) + '); '
+                 "require('illuminate').configure({delay=10,providers={'regex'},under_cursor=true}); "
+                 "vim.api.nvim_set_hl(0,'IlluminatedWordText',{bg=0x334455}); "
+                 "require('illuminate.engine').start(); vim.wait(100)")
+        self.pump(.15)
+        expected = {layer['image_id'] for layer in self.image_layers()}
+        self.assertEqual(len(expected), 2)
+        frames, highlighted = [], 0
+        self.frame_observer = lambda: frames.append({layer['image_id'] for layer in self.image_layers()})
+        self.output.clear()
+        for row, col in ((1, 0), (1, 6), (2, 5), (3, 0), (3, 6), (2, 0)):
+            self.lua('vim.api.nvim_win_set_cursor(0,{' + str(row) + ',' + str(col) + '}); '
+                     "require('illuminate.engine').refresh_references()")
+            self.pump(.07)
+            count = int(self.lua("local ns=vim.api.nvim_get_namespaces()['illuminate.highlight']; "
+                                 "print(ns and #vim.api.nvim_buf_get_extmarks(_G.scratch,ns,0,-1,{}) or 0)"))
+            highlighted += count > 0
+        self.frame_observer = None
+        self.assertEqual(highlighted, 6, 'the real word-highlighter must change scratch decorations')
+        self.assertTrue(frames)
+        self.assertTrue(all(expected <= frame for frame in frames), frames)
+        self.assertNotIn(b'\x1b_G', self.output)
+        self.assertNotIn(b'\x1b]66;', self.output)
+
     def test_native_redraw_frames_keep_all_heading_sizes(self):
         self.tmux('set-option', '-g', 'allow-passthrough', 'on')
         self.render(['BEFORE', '', '# FIRST', '', '## SECOND', '', '### THIRD', '', 'BODY'])

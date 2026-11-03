@@ -24,6 +24,13 @@ return function(test, equal, buffer)
     end
 
     if vim.fn.executable(binary) == 1 then
+        test('image typography finds the bundled helper without changing custom commands', function()
+            assert(images.available({ command = { 'inkstone-raster' } }))
+            assert(images.command({ command = { binary } })[1] == binary)
+            equal(images.command({ command = { '/missing/custom-inkstone-raster' } }), nil)
+            equal(images.command({ command = {} }), nil)
+        end)
+
         test('Rust image headings keep native fallback until ready and reuse immutable assets', function()
             local supports, send, update = typography.supports, graphics.send, ui.update
             typography.supports, ui.update = function() return true end, function() end
@@ -94,7 +101,7 @@ return function(test, equal, buffer)
             return { kill = function() killed = killed + 1 end }
         end
         graphics.send = function() packets = packets + 1 end
-        local buf, render = setup({ 'inkstone-cancel-test' })
+        local buf, render = setup({ 'true' })
         render()
         assert(completion)
         images.clear(buf)

@@ -19,14 +19,15 @@ Kitty and, for tmux, use your existing `allow-passthrough on` setting. The plugi
 does not change tmux options. The current capability gate retains the existing
 Kitty 0.40+ requirement, although Unicode image placeholders predate that release.
 
-For an existing configuration, opt in explicitly:
+Selecting the Git branch alone keeps `backend='text'`. For an existing
+configuration, opt in explicitly:
 
 ```lua
 require('inkstone').setup({
     typography = {
         backend = 'image',
         image = {
-            command = { '/absolute/path/to/inkstone.nvim/native/target/release/inkstone-raster' },
+            -- The default command finds a helper built inside this plugin checkout.
             font = 'monospace', -- Pango/fontconfig family; Japanese uses font fallback
             cell_width = 16,
             cell_height = 32,
@@ -34,6 +35,21 @@ require('inkstone').setup({
     },
 })
 ```
+
+For lazy.nvim, build when installing/updating the experiment:
+
+```lua
+{
+    'aikawa9376/inkstone.nvim',
+    branch = 'experiment/rust-image-typography',
+    build = 'make raster',
+    opts = { typography = { backend = 'image' } },
+}
+```
+
+The default command searches PATH first, then the plugin's own
+`native/target/release/inkstone-raster`. Custom command vectors remain exact;
+an explicit absolute path can select another build.
 
 `backend='text'` remains the default. The image prototype covers top-level ATX
 and Setext headings with the existing wrapping and anti-conceal policy. Inline
@@ -61,3 +77,9 @@ and search still operate on the Markdown, but their highlights are not projected
 inside image pixels. Font fallback and glyph metrics can differ from Kitty's.
 Frame tests validate decoded PNGs and Kitty image render layers, not all GPU or
 desktop-compositor frames.
+
+Other buffers can trigger terminal redraws even when they are plain text.
+The image backend does not repair an OSC 66 overlay in response: ACP streaming
+and word-highlighter extmark changes in a scratch are covered by terminal frame
+tests. This isolates image placement from those updates while leaving their
+normal decorations enabled.

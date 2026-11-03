@@ -11,8 +11,22 @@ local function read(path)
     if data and #data <= 16 * 1024 * 1024 and data:sub(1, 8) == '\137PNG\r\n\26\n' then return data end
 end
 
+function M.command(config)
+    local command = config.command
+    if #command == 0 then return end
+    if vim.fn.executable(command[1]) == 1 then return vim.deepcopy(command) end
+    -- Lazy's build hook builds inside the plugin checkout, outside PATH.
+    -- Only resolve the bundled default; explicit custom commands stay exact.
+    if #command == 1 and command[1] == 'inkstone-raster' then
+        local root = debug.getinfo(1, 'S').source:sub(2)
+        for _ = 1, 4 do root = vim.fs.dirname(root) end
+        local binary = root .. '/native/target/release/inkstone-raster' .. (vim.fn.has('win32') == 1 and '.exe' or '')
+        if vim.fn.executable(binary) == 1 then return { binary } end
+    end
+end
+
 function M.available(config)
-    return #config.command > 0 and vim.fn.executable(config.command[1]) == 1
+    return M.command(config) ~= nil
 end
 
 local function notify(asset)
@@ -91,6 +105,8 @@ end
 
 function M.request(context, entry)
     local config = context.config.typography.image
+    local command = M.command(config)
+    if not command then return end
     local columns, lines = 0, {}
     local colors = require('inkstone.lib.terminal_colors').new(context.win, true)
     for _, line in ipairs(entry.lines) do
@@ -111,9 +127,9 @@ function M.request(context, entry)
     if columns < 1 or columns > 256 or rows > 256 then return end
     local input = vim.json.encode({ font = config.font, cell_width = config.cell_width, cell_height = config.cell_height,
         columns = columns, scale = entry.spec.scale, ratio = entry.spec.ratio, lines = lines })
-    local executable = vim.fn.exepath(config.command[1])
+    local executable = vim.fn.exepath(command[1])
     local stat = vim.uv.fs_stat(executable)
-    local key = vim.fn.sha256('image-font-v1\0' .. input .. vim.json.encode(config.command) .. vim.inspect(stat and { stat.size, stat.mtime }))
+    local key = vim.fn.sha256('image-font-v1\0' .. input .. vim.json.encode(command) .. vim.inspect(stat and { stat.size, stat.mtime }))
     context.typography_image_requests = context.typography_image_requests or {}
     context.typography_image_requests[entry.id] = key
     local state = M.buffers[context.buf]
@@ -126,7 +142,7 @@ function M.request(context, entry)
         if not asset then
             if not pcall(vim.fn.mkdir, config.cache_dir, 'p') then return end
             asset = { key = key, path = config.cache_dir .. '/' .. key .. '.png', input = input,
-                command = vim.deepcopy(config.command), timeout = config.timeout, columns = columns, rows = rows, users = {}, status = 'queued' }
+                command = command, timeout = config.timeout, columns = columns, rows = rows, users = {}, status = 'queued' }
             M.assets[key] = asset
             local cached = read(asset.path)
             if cached then ready(asset, cached) else M.queue[#M.queue + 1] = asset end
