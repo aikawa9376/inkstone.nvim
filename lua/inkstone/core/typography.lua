@@ -804,6 +804,25 @@ function M.clear(buf, keep_waiter, keep_images)
     if painted then vim.schedule(function() if vim.v.dying == 0 then vim.cmd('redraw!') end end) end
 end
 
+-- Focus integrations need both backends, without treating pending or
+-- anti-concealed image assets as displayed typography or loading a renderer.
+function M.visible()
+    local tab = vim.api.nvim_get_current_tabpage()
+    local function current(buf, state)
+        local win = state.win
+        return vim.api.nvim_win_is_valid(win) and vim.api.nvim_win_get_tabpage(win) == tab
+            and vim.api.nvim_win_get_buf(win) == buf
+    end
+    for buf, state in pairs(M.active) do
+        if #state.entries > 0 and current(buf, state) then return true end
+    end
+    local images = package.loaded['inkstone.core.typography_image']
+    for buf, state in pairs(images and images.buffers or {}) do
+        if state.shown and current(buf, state) then return true end
+    end
+    return false
+end
+
 function M.update(context, extmarks)
     local shown, entries = {}, {}
     for _, extmark in ipairs(extmarks) do
@@ -813,16 +832,14 @@ function M.update(context, extmarks)
     for _, entry in ipairs(context.typography) do
         if not entry.image and shown[entry.id] then entries[#entries + 1] = entry end
     end
+    local images = package.loaded['inkstone.core.typography_image']
+    if images then images.update(context, shown) end
     if #entries == 0 then
         if M.active[context.buf] then
             M.clear(context.buf, context.config.typography.enabled ~= false, true)
         end
-        local images = package.loaded['inkstone.core.typography_image']
-        if images then images.update(context) end
         return
     end
-    local images = package.loaded['inkstone.core.typography_image']
-    if images then images.update(context) end
     local previous = M.active[context.buf]
     local tick = vim.api.nvim_buf_get_changedtick(context.buf)
     if previous and previous.win ~= context.win then

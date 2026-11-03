@@ -1366,6 +1366,41 @@ class TerminalTests(unittest.TestCase):
         self.assertNotIn(b'\x1b]66;', self.output, 'image typography must not use OSC 66 repair')
         self.assert_source()
 
+    def test_image_typography_keeps_images_during_configured_focus_effects(self):
+        config = Path(os.environ.get('INKSTONE_NVIM_CONFIG', Path.home() / '.config/nvim'))
+        glow = Path(os.environ.get('INKSTONE_UNDO_GLOW_RTP', Path.home() / '.local/share/nvim/lazy/undo-glow.nvim'))
+        if not (config / 'lua/config/markdown_renderer.lua').is_file() or not (glow / 'lua/undo-glow/init.lua').is_file():
+            self.skipTest('focus integration and undo-glow are not installed')
+        self.image_typography(['BEFORE', '', '# FIRST', '', '## SECOND', '', 'BODY'])
+        self.lua('vim.opt.rtp:append(' + json.dumps(str(config)) + '); '
+                 'vim.opt.rtp:append(' + json.dumps(str(glow)) + '); '
+                 'dofile(' + json.dumps(str(config / 'lua/config/colorScheme.lua')) + '); '
+                 'dofile(' + json.dumps(str(config / 'lua/plugins/undo-glow.lua')) + ').config(); '
+                 "vim.api.nvim_set_hl(0,'Normal',{fg=0x839496,bg=0x002b36}); "
+                 "require('inkstone.api').render({buf=vim.api.nvim_get_current_buf()}); vim.wait(200)")
+        self.pump(.1)
+        expected = {layer['image_id'] for layer in self.image_layers()}
+        self.assertEqual(len(expected), 2)
+        frames = []
+        self.frame_observer = lambda: frames.append({layer['image_id'] for layer in self.image_layers()})
+        self.output.clear()
+        for _ in range(5):
+            for event in (b'\x1b[O', b'\x1b[I'):
+                os.write(self.fd, event)
+                self.pump(.12)
+                self.assertEqual(self.lua("print(vim.api.nvim_get_hl(0,{name='Normal'}).bg)"), str(0x002b36))
+                # Also exercise a refreshed layout while the terminal is unfocused.
+                self.lua("require('inkstone.api').render({buf=vim.api.nvim_get_current_buf()}); "
+                         "vim.api.nvim_set_hl(0,'CursorLine',{bg=0x223344}); "
+                         "vim.wo.cursorline=not vim.wo.cursorline; vim.cmd('redraw!')")
+                self.pump(.08)
+        self.frame_observer = None
+        self.assertTrue(frames, 'no configured focus frames sampled')
+        self.assertTrue(all(expected <= frame for frame in frames), frames)
+        self.assertNotIn(b'\x1b_G', self.output, 'focus replaced or retransmitted heading images')
+        self.assertNotIn(b'\x1b]66;', self.output)
+        self.assert_source()
+
     def test_image_typography_restores_source_and_releases_owned_images(self):
         self.image_typography(['BEFORE', '', '# FIRST', '', '## SECOND', '', 'BODY'])
         self.assertEqual(len({layer['image_id'] for layer in self.image_layers()}), 2)

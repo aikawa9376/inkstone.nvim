@@ -185,12 +185,17 @@ function M.request(context, entry)
     end
 end
 
-function M.update(context)
+function M.update(context, shown)
     local state = M.buffers[context.buf]
     if not state then return end
+    state.shown = false
     local requested = context.config.typography.backend == 'image' and context.typography_image_requests or {}
     for id, slot in pairs(state.entries) do
-        if not requested or requested[id] ~= slot.asset.key then release(slot); state.entries[id] = nil end
+        if not requested or requested[id] ~= slot.asset.key then
+            release(slot); state.entries[id] = nil
+        elseif shown and shown[id] and slot.asset.status == 'ready' then
+            state.shown = true
+        end
     end
     if not next(state.entries) then M.buffers[context.buf] = nil end
 end

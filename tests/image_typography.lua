@@ -74,6 +74,7 @@ return function(test, equal, buffer)
             local buf, render, source = setup({ binary })
             local first = render()
             for _, mark in ipairs(first) do assert(not mark.font_id, 'pending image must retain the normal renderer') end
+            assert(not typography.visible(), 'pending assets must not suppress ordinary focus effects')
             local function asset()
                 local state = images.buffers[buf]
                 return state and state.entries['heading:2'] and state.entries['heading:2'].asset
@@ -91,6 +92,34 @@ return function(test, equal, buffer)
                 end
             end
             assert(found, 'ready heading must use native placeholder extmarks')
+            local ns = vim.api.nvim_create_namespace('inkstone-image-visibility-test')
+            local extmarks = {}
+            for _, mark in ipairs(marks) do
+                local extmark = require('inkstone.lib.extmark').new(mark)
+                extmark:show(ns, buf)
+                extmarks[#extmarks + 1] = extmark
+            end
+            typography.update(context, extmarks)
+            assert(typography.visible(), 'shown images must participate in focus protection')
+            vim.cmd('vnew')
+            assert(typography.visible(), 'a rendered sibling must remain protected')
+            vim.cmd('tabnew')
+            assert(not typography.visible(), 'a hidden tab must retain ordinary focus behavior')
+            vim.cmd('tabclose')
+            assert(typography.visible())
+            vim.cmd('close')
+            for _, extmark in ipairs(extmarks) do extmark:hide(ns, buf) end
+            typography.update(context, extmarks)
+            assert(not typography.visible(), 'anti-concealed assets must not suppress focus effects')
+            equal(asset(), ready, 'hiding placeholders must retain their cached asset')
+            for _, extmark in ipairs(extmarks) do extmark:show(ns, buf) end
+            typography.update(context, extmarks)
+            local owner = images.buffers[buf].win
+            local scratch = vim.api.nvim_create_buf(false, true)
+            vim.api.nvim_win_set_buf(owner, scratch)
+            assert(not typography.visible(), 'a stale image owner must not suppress focus effects')
+            vim.api.nvim_win_set_buf(owner, buf)
+            vim.api.nvim_buf_delete(scratch, { force = true })
             local sent = #packets
             render()
             equal(asset(), ready)
@@ -129,7 +158,10 @@ return function(test, equal, buffer)
 
     test('cancelled raster jobs cannot publish images or revive disposed buffers', function()
         local supports, system, send, update = typography.supports, vim.system, graphics.send, ui.update
-        typography.supports, ui.update = function() return true end, function() error('disposed request revived its buffer') end
+        typography.supports = function() return true end
+        ui.update = function(_, _, event)
+            assert(event ~= 'TypographyImageReady', 'disposed request revived its buffer')
+        end
         local completion, killed, packets = nil, 0, 0
         vim.system = function(_, _, callback)
             completion = callback

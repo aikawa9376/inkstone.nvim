@@ -632,6 +632,15 @@ Per-image highlight IDs are restored if a colorscheme cleared them. Release
 deletes only exact owned image IDs; hidden uploads cannot place pixels on the
 destination pane because prototypes have no physical screen location.
 
+`typography.visible()` reports shown typography in valid windows of the current
+tab for either backend. Image ownership alone is insufficient: pending, failed
+and anti-concealed assets do not count. `typography_image.update` records the
+shown placeholder extmarks during reconciliation. Focus integrations can use
+this query to retain the existing Normal background and avoid focus animations.
+An OSC-only check misses image headings: changing Normal between transparent
+and opaque changes their resolved raster colors, invalidating the cache key and
+replacing/retransmitting the image on each focus transition.
+
 Image generation/display is optional and the default remains `backend='text'`.
 The capability gate conservatively retains Kitty 0.40+ and existing passthrough
 permission checks. Inline small spans keep ordinary rendering in this backend.
