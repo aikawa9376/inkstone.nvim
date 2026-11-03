@@ -1292,7 +1292,7 @@ class TerminalTests(unittest.TestCase):
         self.assertTrue(all(not missing for missing in frames), frames)
         self.assert_source()
 
-    def image_typography(self, lines, anti_conceal=False):
+    def image_typography(self, lines, anti_conceal=False, font=None):
         binary = Path(os.environ.get('INKSTONE_RASTER', ROOT / 'native/target/release/inkstone-raster'))
         if not binary.is_file():
             self.skipTest('run make raster to build the Rust image typography helper')
@@ -1302,6 +1302,7 @@ class TerminalTests(unittest.TestCase):
         self.lua("vim.env.KITTY_WINDOW_ID='1'; local b=vim.api.nvim_get_current_buf(); "
                  "local c=require('inkstone.state').get(b); c.typography.backend='image'; "
                  'c.typography.image.command={' + json.dumps(str(binary)) + '}; '
+                 + ('c.typography.image.font=' + json.dumps(font) + '; ' if font else '') +
                  'c.typography.image.cache_dir=' + json.dumps(str(self.root / 'raster')) + '; '
                  "require('inkstone.core.typography').clear(b); require('inkstone.api').render({buf=b}); "
                  "assert(vim.wait(4000,function() local ctx=require('inkstone.request.context').get(b); "
@@ -1315,6 +1316,27 @@ class TerminalTests(unittest.TestCase):
         return self.screen.grman.update_layers(0, -1., 1., 2. / self.screen.columns,
                                               2. / self.screen.lines, self.screen.columns,
                                               self.screen.lines, 16, 32)
+
+    def test_image_typography_preserves_words_and_fractional_heading_metrics(self):
+        self.image_typography(['BEFORE', '', '# inkstone.nvim', '', '# 必要なもの', '',
+                               '## 必要なもの', '', '### 必要なもの', '', 'BODY'],
+                              font='Liga Plemol Console NF')
+        requests = json.loads(self.lua("local result={}; local b=vim.api.nvim_get_current_buf(); "
+            "for id,slot in pairs(require('inkstone.core.typography_image').buffers[b].entries) do "
+            "result[id]={request=vim.json.decode(slot.asset.input),id=slot.asset.id} end; print(vim.json.encode(result))"))
+        title = requests['heading:2']['request']
+        self.assertEqual([run['text'] for run in title['lines'][0]], ['inkstone.nvim'])
+        for row, ratio, columns in ((4, 2, 20), (6, 1.5, 15), (8, 1.25, 13)):
+            entry = requests['heading:' + str(row)]
+            request = entry['request']
+            self.assertEqual(request['ratio'], ratio)
+            self.assertEqual(request['columns'], columns)
+            self.assertEqual([run['text'] for run in request['lines'][0]], ['必要なもの'])
+            self.assertEqual(request['lines'][0][0]['cells'], 10 * ratio)
+            decoded = self.screen.grman.image_for_client_id(entry['id'])
+            self.assertEqual(decoded['width'], columns * 16)
+        self.assertEqual(len({layer['image_id'] for layer in self.image_layers()}), 4)
+        self.assert_source()
 
     def test_image_typography_uses_native_placeholders_without_replay(self):
         self.image_typography(['BEFORE', '', '# 日本語 FIRST', '', '## SECOND', '', '### THIRD', '', 'BODY'])

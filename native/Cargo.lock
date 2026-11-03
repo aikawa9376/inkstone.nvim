@@ -216,9 +216,10 @@ dependencies = [
 
 [[package]]
 name = "inkstone-raster"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "cairo-rs",
+ "pango",
  "pangocairo",
  "serde",
  "serde_json",

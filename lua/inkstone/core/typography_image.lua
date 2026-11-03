@@ -103,6 +103,32 @@ dispatch = function()
     end
 end
 
+-- Image layout has no OSC 66 packet limit or per-packet integer advance.
+-- Preserve full style spans and round only the final grid extent.
+function M.layout(chunks, spec, budget, options)
+    local units = {}
+    local limit = (budget + 1e-8) / spec.ratio
+    for _, unit in ipairs(require('inkstone.parser.table').units(chunks)) do
+        local clean = unit.text:gsub('[%c]', '')
+        if clean ~= '' and unit.width > 0 then
+            if unit.width > limit then return end
+            units[#units + 1] = { text = clean, width = unit.width, highlight = unit.highlight }
+        end
+    end
+    if #units == 0 then return {} end
+    local lines = {}
+    for _, chunks_line in ipairs(require('inkstone.text.layout').wrap(units, limit, options)) do
+        local runs, width = {}, 0
+        for _, chunk in ipairs(chunks_line) do
+            local advance = vim.fn.strdisplaywidth(chunk[1]) * spec.ratio
+            runs[#runs + 1] = { text = chunk[1], width = advance, highlight = chunk[2] }
+            width = width + advance
+        end
+        if #runs > 0 then lines[#lines + 1] = { runs = runs, width = math.ceil(width - 1e-8) } end
+    end
+    return lines
+end
+
 function M.request(context, entry)
     local config = context.config.typography.image
     local command = M.command(config)
@@ -129,7 +155,7 @@ function M.request(context, entry)
         columns = columns, scale = entry.spec.scale, ratio = entry.spec.ratio, lines = lines })
     local executable = vim.fn.exepath(command[1])
     local stat = vim.uv.fs_stat(executable)
-    local key = vim.fn.sha256('image-font-v1\0' .. input .. vim.json.encode(command) .. vim.inspect(stat and { stat.size, stat.mtime }))
+    local key = vim.fn.sha256('image-font-v2\0' .. input .. vim.json.encode(command) .. vim.inspect(stat and { stat.size, stat.mtime }))
     context.typography_image_requests = context.typography_image_requests or {}
     context.typography_image_requests[entry.id] = key
     local state = M.buffers[context.buf]

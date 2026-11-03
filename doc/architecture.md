@@ -598,8 +598,13 @@ eligibility and user-facing limits; `demo/rich.md` is the interactive sample.
 
 ## Experimental image typography
 
-The opt-in `typography.backend='image'` reuses heading collection, scaled
-wrapping, source restoration and shared-buffer fallback. `core/typography_image.lua`
+The opt-in `typography.backend='image'` reuses heading collection, source
+restoration and shared-buffer fallback. `typography_image.layout` wraps native
+display units with the existing Japanese/word-boundary layout, using the scaled
+width budget. It retains whole style spans with fractional advances and rounds
+only the final placeholder extent. OSC 66's seven-cell packet splitting and
+per-packet cell quantization must not be reused: those produced gaps inside
+`inkstone.nvim` and `必要なもの` in the photographed prototype. `core/typography_image.lua`
 owns per-buffer heading slots and refcounted content assets. The Rust helper in
 `native/` reads bounded JSON and returns PNG pixels using Pango/Cairo; it has no
 terminal output or source-file access. At most two conversion jobs run at once.
@@ -607,6 +612,15 @@ Text/styles, font, raster cell dimensions, command and executable metadata key
 the disk cache. Obsolete slots cancel unshared work; late completions cannot
 upload or trigger a render after their owner is disposed. Errors retain the
 normal heading renderer, and PNG publication uses private temporary files.
+
+The Rust helper shapes each complete line with Pango attributes indexed by
+UTF-8 bytes, merging equivalent adjacent attributes. Subpixel font metrics and
+unrounded glyph positions set the base size. A single horizontal transform fits
+the terminal cell proportions; fallback-font width correction applies to the
+whole line. Native row reservations use ceil(ratio), while the font uses the
+actual ratio, so 1.25x/1.5x/2x remain visually distinct within two-row layouts.
+Rust pixel tests compare split versus unsplit words and actual ink bounds across
+ratios; image-presence tests alone do not establish spacing or size correctness.
 
 `lib/graphics.lua` is independent of Snacks and heading layout. It uploads PNGs
 as quiet Kitty graphics virtual placements and encodes full image IDs plus

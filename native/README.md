@@ -5,7 +5,7 @@ It reads one JSON request from stdin and writes one PNG to stdout. It never
 writes terminal controls, reads source files or invokes an external command.
 The Lua graphics transport can also display PNGs produced by other tools.
 
-Build dependencies are Rust 1.92+/Cargo, pkg-config, and the Pango/Cairo development
+Build dependencies are Rust 1.92+/Cargo, pkg-config, and the Pango 1.44+/Cairo development
 libraries. No GTK windowing application or Snacks plugin is required.
 
 ```sh
@@ -61,6 +61,13 @@ generation is asynchronous with at most two jobs; no worker starts per redraw.
 The raster cell dimensions control resolution and aspect ratio, independently
 of the actual terminal font size. Images fit their reserved terminal cells;
 adjust these values to match your terminal's cell proportions if necessary.
+Each output line is shaped as a single Pango layout with UTF-8 style ranges.
+Image layout does not use OSC 66's seven-cell packets or rounded per-span
+advances. Fractional spans retain their exact scaled widths until the final
+placeholder column count is rounded up. Font calibration uses subpixel metrics
+and a common transform for the whole line, preserving spacing inside words.
+Both 1.5x and 2x headings reserve two native rows, but their actual glyph pixels
+are scaled by 1.5 and 2 respectively; the row reservation is not the font size.
 No terminal response query is added, including under tmux extended keys.
 
 Assets are keyed by text, styles, font, dimensions, command and executable file

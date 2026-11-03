@@ -343,6 +343,7 @@ function M.heading(context, marks, node, data)
     local inline = content and content:child('inline')
     if not inline then return false end
     local lines, budget = {}, context:window_width()
+    local image = context.config.typography.backend == 'image' and require('inkstone.core.typography_image')
     -- Setext titles may contain multiple source lines. Resolve styles and
     -- inline replacements on each row, keeping their existing line breaks.
     for i, text in ipairs(vim.split(inline.text, '\n', { plain = true })) do
@@ -350,21 +351,27 @@ function M.heading(context, marks, node, data)
         local line = require('inkstone.lib.display').line(context, {
             start_row = row, end_row = row, start_col = col, end_col = col + #text, text = text,
         })
-        local current, width = {}, 0
-        for _, run in ipairs(M.runs(line, spec)) do
-            if run.width > budget then return false end
-            if width + run.width > budget then lines[#lines + 1] = { runs = current, width = width }; current, width = {}, 0 end
-            current[#current + 1], width = run, width + run.width
+        if image then
+            local wrapped = image.layout(line, spec, budget, context.config.paragraph.japanese)
+            if not wrapped then return false end
+            vim.list_extend(lines, wrapped)
+        else
+            local current, width = {}, 0
+            for _, run in ipairs(M.runs(line, spec)) do
+                if run.width > budget then return false end
+                if width + run.width > budget then lines[#lines + 1] = { runs = current, width = width }; current, width = {}, 0 end
+                current[#current + 1], width = run, width + run.width
+            end
+            if #current > 0 then lines[#lines + 1] = { runs = current, width = width } end
         end
-        if #current > 0 then lines[#lines + 1] = { runs = current, width = width } end
     end
     if #lines == 0 then return false end
     local last = node.end_row - (node.end_col == 0 and 1 or 0)
     local entry = { id = 'heading:' .. node.start_row, range = { node.start_row, last },
         row = node.start_row, col = 0, spec = spec, lines = lines, highlight = data.fg, background = data.bg }
     local grid
-    if context.config.typography.backend == 'image' then
-        grid = require('inkstone.core.typography_image').request(context, entry)
+    if image then
+        grid = image.request(context, entry)
         -- Keep the complete normal renderer until the PNG has been uploaded.
         if not grid then return false end
         entry.image = true

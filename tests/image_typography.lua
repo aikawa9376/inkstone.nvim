@@ -5,11 +5,11 @@ return function(test, equal, buffer)
     local images = require('inkstone.core.typography_image')
     local graphics = require('inkstone.lib.graphics')
     local ui = require('inkstone.core.ui')
-    local function setup(command)
+    local function setup(command, source_lines)
         require('inkstone').setup({ anti_conceal = { enabled = false }, media = { enabled = false },
             typography = { enabled = true, backend = 'image', image = { command = command,
                 cache_dir = vim.fn.tempname() } } })
-        local lines = { 'BEFORE', '', '# 日本語 **Heading**', '', 'AFTER' }
+        local lines = source_lines or { 'BEFORE', '', '# 日本語 **Heading**', '', 'AFTER' }
         local buf = buffer(lines)
         vim.bo[buf].filetype = 'markdown'
         vim.wo.conceallevel = 3
@@ -22,6 +22,41 @@ return function(test, equal, buffer)
         end
         return buf, render, lines
     end
+
+    test('image headings keep words continuous and round fractional widths only per line', function()
+        local supports, request = typography.supports, images.request
+        typography.supports = function() return true end
+        local entries = {}
+        images.request = function(_, entry) entries[#entries + 1] = entry end
+        local buf, render = setup({ binary }, { '# inkstone.nvim', '', '## 必要なもの', '', '### ローカルで使う' })
+        render()
+        typography.supports, images.request = supports, request
+        equal(#entries, 3)
+        equal(#entries[1].lines[1].runs, 1)
+        equal(entries[1].lines[1].runs[1].text, 'inkstone.nvim')
+        equal(entries[1].lines[1].width, 26)
+        equal(#entries[2].lines[1].runs, 1)
+        equal(entries[2].lines[1].runs[1].text, '必要なもの')
+        equal(entries[2].lines[1].width, 15)
+        equal(entries[3].spec.ratio, 1.25)
+        equal(entries[3].lines[1].width, 18)
+        vim.api.nvim_buf_delete(buf, { force = true })
+    end)
+
+    test('image layout preserves styled fractional advances and wraps complete words', function()
+        local style = { 'Title', 'Bold' }
+        local lines = images.layout({ { 'a', style }, { 'bc', 'Title' } }, typography.spec(1.5), 20)
+        equal(lines[1].runs[1].width, 1.5)
+        equal(lines[1].runs[2].width, 3)
+        equal(lines[1].width, 5)
+        equal(lines[1].runs[1].highlight, style)
+        lines = images.layout({ { 'Reproduce paragraph', 'Title' } }, typography.spec(1.5), 15)
+        equal(#lines, 2)
+        equal(lines[1].runs[1].text, 'Reproduce')
+        equal(lines[2].runs[1].text, 'paragraph')
+        equal(lines[1].width, 14)
+        equal(lines[2].width, 14)
+    end)
 
     if vim.fn.executable(binary) == 1 then
         test('image typography finds the bundled helper without changing custom commands', function()

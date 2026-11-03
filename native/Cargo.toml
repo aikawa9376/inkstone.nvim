@@ -1,6 +1,6 @@
 [package]
 name = "inkstone-raster"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 rust-version = "1.92"
 license = "MIT"
@@ -9,6 +9,7 @@ description = "Experimental Pango/Cairo heading rasterizer for inkstone.nvim"
 [dependencies]
 cairo-rs = { version = "0.22", features = ["png"] }
 pangocairo = "0.22"
+pango = { version = "0.22", features = ["v1_44"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
