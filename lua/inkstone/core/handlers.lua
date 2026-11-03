@@ -75,11 +75,13 @@ function M.run(context, parser)
     local marks = {} ---@type render.md.Mark[]
     for _, language in ipairs(languages) do
         local roots = language_roots[language]
+        local seen = {}
         for i, root in ipairs(roots) do
             M.tree(marks, language, {
                 buf = context.buf,
                 root = root,
                 last = i == #roots,
+                seen = seen,
             })
         end
     end

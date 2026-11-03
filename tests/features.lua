@@ -15,6 +15,33 @@ return function(test, equal, buffer)
         return buf, parser, ctx, require('inkstone.core.handlers').run(ctx, parser)
     end
 
+    test('overlapping inline trees render each source link once without inflating widths', function()
+        local line = '[本体](https://github.com/one)・[設定](https://github.com/two)'
+        local buf, parser = parse({ '', line, '' })
+        local child = assert(parser:children().markdown_inline)
+        local range = { 1, 0, 1, #line }
+        child:set_included_regions({ { range }, { range } })
+        child:parse(true)
+        local roots = 0
+        parser:for_each_tree(function(_, lt) if lt:lang() == 'markdown_inline' then roots = roots + 1 end end)
+        equal(roots, 2, 'the real parser must expose overlapping source captures')
+        for _ = 1, 2 do
+            local ctx = Context.new(buf, vim.api.nvim_get_current_win(), require('inkstone.state').get(buf))
+            local marks = require('inkstone.core.handlers').run(ctx, parser)
+            local icons = {}
+            for _, mark in ipairs(marks) do
+                if mark.opts.virt_text_pos == 'inline' and mark.opts.priority == 9000 then
+                    icons[#icons + 1] = mark.start_col
+                end
+            end
+            equal(icons, { 0, #('[本体](https://github.com/one)・') })
+            local body = { start_row = 1, start_col = 0, end_row = 1, end_col = #line, text = line }
+            equal(#ctx.inline:get(body), 2)
+            equal(ctx.inline:width(body), 2 * vim.fn.strdisplaywidth(ctx.config.link.custom.github.icon))
+        end
+        vim.api.nvim_buf_delete(buf, { force = true })
+    end)
+
     test('table heading borders preserve color with opt-in RGB and cterm bold', function()
         local colors = require('inkstone.core.colors')
         local source = 'InkstoneTestTableHead'

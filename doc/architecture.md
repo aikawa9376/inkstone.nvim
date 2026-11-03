@@ -200,6 +200,16 @@ splitting virtual highlight chunks into visible invalid-byte placeholders and
 inflating measured widths. Captures spanning disjoint views are deduplicated,
 and source line reads remain bounded to the visible ranges.
 
+Inline render captures are also deduplicated before producing marks or updating
+inline widths/highlights. `core/handlers.lua` shares a capture set across all
+roots of one language in a render pass; `handler/markdown_inline.lua` keys it by
+capture, node type and source byte range. Overlapping injected trees can expose
+the same source link with different node IDs. Node IDs or row-only keys cannot
+identify logical links: a row with two distinct links must retain two icons.
+The set is local to the pass, so later edits and refreshes render normally.
+This complements parser-side injection guards and covers disjoint-view repeats;
+deduplicating final extmarks alone would leave inflated inline width state.
+
 Replacement chunks also carry persistent foreign extmark range highlights,
 including LazyAgent transcript role colors. `Highlights:extmarks` queries only
 visible ranges with overlap enabled, clips multiline byte ranges per row, and

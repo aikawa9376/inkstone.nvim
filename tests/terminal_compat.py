@@ -214,6 +214,22 @@ class TerminalTests(unittest.TestCase):
         self.assertIn(source, self.visible_text())
         self.assert_source()
 
+    def test_adjacent_links_keep_one_icon_each_with_overlapping_inline_trees(self):
+        source = ' [本体](https://github.com/one)・[設定](https://github.com/two)ともに commit・push 済みです。'
+        self.render(['BEFORE', '', source, '', 'AFTER'], conceallevel=3)
+        self.lua("local p=vim.treesitter.get_parser(0,'markdown'); p:parse(true); "
+                 "local c=assert(p:children().markdown_inline); "
+                 'local range={2,0,2,' + str(len(source.encode())) + '}; '
+                 "c:set_included_regions({{range},{range}}); c:parse(true); "
+                 "require('inkstone.api').render({buf=vim.api.nvim_get_current_buf()}); vim.wait(100); vim.cmd('redraw!')")
+        self.pump(.1)
+        self.assertEqual(self.visible_text().count('󰊤'), 2, self.visible_text())
+        self.assertIn('󰊤 本体・󰊤 設定', self.visible_text())
+        self.assertEqual(int(self.lua("local count=0; for _,m in ipairs(vim.api.nvim_buf_get_extmarks(0,"
+            "require('inkstone.core.ui').ns,{2,0},{2,-1},{details=true})) do "
+            "if m[4].virt_text_pos=='inline' and m[4].priority==9000 then count=count+1 end end; print(count)")), 2)
+        self.assert_source()
+
     def test_acp_indented_table(self):
         fcntl.ioctl(self.fd, termios.TIOCSWINSZ, struct.pack('HHHH', 24, 60, 0, 0))
         self.screen.resize(24, 60)

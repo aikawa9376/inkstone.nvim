@@ -847,6 +847,7 @@ M.handlers = {}
 ---@field buf integer
 ---@field root TSNode
 ---@field last boolean
+---@field seen? table<string, boolean> Captures shared across this language's roots in one render pass.
 
 ---@type table<string, render.md.Handler>
 M.handlers.default = {
