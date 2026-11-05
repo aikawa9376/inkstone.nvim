@@ -635,7 +635,11 @@ ratios; image-presence tests alone do not establish spacing or size correctness.
 `lib/graphics.lua` is independent of Snacks and heading layout. It uploads PNGs
 as quiet Kitty graphics virtual placements and encodes full image IDs plus
 row/column indices into ordinary placeholder cells. Ready headings emit those
-cells in their inline and virtual-line extmarks. Normal redraw, scrolling,
+cells in their overlay and virtual-line extmarks. The first image row overlays
+the concealed source line rather than adding inline width: it clips at the
+window edge just like the remaining virtual rows. Otherwise a pending resize
+or a full-width row followed by a `listchars` EOL marker can wrap that first
+row and separate the glyphs' upper and lower halves. Normal redraw, scrolling,
 popup occlusion and tmux window switching move/clip the same cells. No OSC 66
 provider, idle repair, or image retransmission participates in their redraw.
 Per-image highlight IDs are restored if a colorscheme cleared them. Release

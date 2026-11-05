@@ -382,7 +382,11 @@ function M.heading(context, marks, node, data)
         local out = {}; for _, run in ipairs(at.runs) do out[#out + 1] = { run.text, run.highlight } end
         return reserve(out)
     end
-    marks:over(context.config.heading, true, node, { conceal = '', virt_text = grid and grid[1] or chunks(lines[1]), virt_text_pos = 'inline' })
+    -- Image rows must all clip at the window edge. An inline first row can
+    -- wrap before its virtual-line remainder (during resize or for listchars
+    -- eol), inserting a blank row through the middle of the glyphs.
+    marks:over(context.config.heading, true, node, { conceal = '', virt_text = grid and grid[1] or chunks(lines[1]),
+        virt_text_pos = grid and 'overlay' or 'inline' })
     if grid then
         for i = 2, #grid do virtual[#virtual + 1] = grid[i] end
     else

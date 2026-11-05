@@ -1354,6 +1354,44 @@ class TerminalTests(unittest.TestCase):
         self.assertEqual(len({layer['image_id'] for layer in self.image_layers()}), 4)
         self.assert_source()
 
+    def test_image_typography_rows_stay_adjacent_at_narrow_widths(self):
+        self.image_typography(['BEFORE', '', '# inkstone.nvim', '', 'BODY'])
+        # Keep the existing grid while resize/layout work is pending. Its
+        # first row must clip like the virtual rows, never wrap between them.
+        self.lua("local ui=require('inkstone.core.ui'); _G.image_update=ui.update; ui.update=function() end; vim.wo.list=true")
+        for width, eol in ((26, True), (24, False), (16, False), (40, True)):
+            with self.subTest(width=width, eol=eol):
+                self.lua("vim.opt_local.listchars=" + ("{eol='$'}" if eol else "{trail='-'}"))
+                fcntl.ioctl(self.fd, termios.TIOCSWINSZ, struct.pack('HHHH', 24, width, 0, 0))
+                self.screen.resize(24, width)
+                os.kill(self.pid, signal.SIGWINCH)
+                self.pump(.15)
+                self.lua("vim.cmd('redraw!')")
+                self.pump(.05)
+                layers = sorted(self.image_layers(), key=lambda layer: layer['src_rect']['top'])
+                self.assertEqual(len(layers), 2, layers)
+                top, bottom = layers
+                self.assertAlmostEqual(top['src_rect']['bottom'], bottom['src_rect']['top'])
+                self.assertAlmostEqual(top['dest_rect']['bottom'], bottom['dest_rect']['top'],
+                                       msg='native wrapping separated the top and bottom image rows')
+                for edge in ('left', 'right'):
+                    self.assertAlmostEqual(top['dest_rect'][edge], bottom['dest_rect'][edge])
+        self.lua("require('inkstone.core.ui').update=_G.image_update; "
+                 "require('inkstone.core.manager').init(); require('inkstone.core.manager').attach(vim.api.nvim_get_current_buf())")
+        fcntl.ioctl(self.fd, termios.TIOCSWINSZ, struct.pack('HHHH', 24, 24, 0, 0))
+        self.screen.resize(24, 24)
+        os.kill(self.pid, signal.SIGWINCH)
+        self.pump(.15)
+        self.lua("require('inkstone.api').render({buf=vim.api.nvim_get_current_buf()}); "
+                 "assert(vim.wait(4000,function() local ctx=require('inkstone.request.context').get(vim.api.nvim_get_current_buf()); "
+                 "for _,e in ipairs(ctx.typography) do if e.image and #e.lines==2 then return true end end end,10)); vim.cmd('redraw!')")
+        self.pump(.05)
+        layers = sorted(self.image_layers(), key=lambda layer: layer['src_rect']['top'])
+        self.assertEqual(len(layers), 4, 'relayout must wrap the heading into two complete text lines')
+        for upper, lower in zip(layers, layers[1:]):
+            self.assertAlmostEqual(upper['dest_rect']['bottom'], lower['dest_rect']['top'])
+        self.assert_source()
+
     def test_image_typography_uses_native_placeholders_without_replay(self):
         self.image_typography(['BEFORE', '', '# 日本語 FIRST', '', '## SECOND', '', '### THIRD', '', 'BODY'])
         self.assertEqual(self.screen.grman.image_count, 3)
