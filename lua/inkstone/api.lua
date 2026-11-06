@@ -81,6 +81,14 @@ function M.move_up()
     require('inkstone.core.folds').move(-1)
 end
 
+function M.move_left()
+    require('inkstone.core.links').move(-1)
+end
+
+function M.move_right()
+    require('inkstone.core.links').move(1)
+end
+
 function M.toggle_table()
     require('inkstone.core.table_views').toggle()
 end

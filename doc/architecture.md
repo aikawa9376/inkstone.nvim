@@ -210,6 +210,23 @@ The set is local to the pass, so later edits and refreshes render normally.
 This complements parser-side injection guards and covers disjoint-view repeats;
 deduplicating final extmarks alone would leave inflated inline width state.
 
+`parser/link.lua:text_fragment` recovers shortcut labels followed by single-line
+HTTP(S) text-fragment destinations with unmatched literal opening parentheses.
+The scan is bounded to the inline tree and URL token; ordinary invalid Markdown
+is not reinterpreted. `render/inline/shortcut.lua` delegates recovered links to
+the normal link renderer, which adds explicit prefix/destination conceal marks
+and updates the shared display-width state. Link icons keep these rows on the
+native-wrap path rather than inserting padding based on the exposed URL.
+
+Link icon descriptions carry a source `link_range`. `core/links.lua` intersects
+these displayed ranges with native conceal snapshots and shown explicit conceal
+marks for Normal-mode `h/l` movement. Touching half-open ranges merge without
+swallowing visible characters. It rejects stale buffer ticks and honors current
+cursor-line conceal and mark visibility; individual key presses do not parse.
+`core/manager.lua` installs buffer-local defaults before `on.attach`, alongside
+the fold motions. Counts traverse visible positions; raw views, operators and
+Visual retain native motions.
+
 Replacement chunks also carry persistent foreign extmark range highlights,
 including LazyAgent transcript role colors. `Highlights:extmarks` queries only
 visible ranges with overlap enabled, clips multiline byte ranges per row, and

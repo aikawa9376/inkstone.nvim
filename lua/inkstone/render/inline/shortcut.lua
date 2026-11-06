@@ -1,5 +1,6 @@
 local Base = require('inkstone.render.base')
 local Footnote = require('inkstone.render.common.footnote')
+local Link = require('inkstone.render.inline.link')
 local Wiki = require('inkstone.render.common.wiki')
 
 ---@class render.md.render.inline.Shortcut: render.md.Render
@@ -28,6 +29,7 @@ end
 
 ---@protected
 function Render:run()
+    if Link:execute(self.context, self.marks, self.node) then return end
     local _, line = self.node:line('first', 0)
     if line and line:find('[' .. self.node.text .. ']', 1, true) then
         Wiki:execute(self.context, self.marks, self.node)

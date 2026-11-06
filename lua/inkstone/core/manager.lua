@@ -132,6 +132,7 @@ function M.attach(buf)
 
     local config = state.get(buf)
     require('inkstone.core.folds').attach(buf)
+    require('inkstone.core.links').attach(buf)
     require('inkstone.core.actions').attach(buf)
     state.on.attach({ buf = buf })
     state.attach()

@@ -60,6 +60,104 @@ return function(test, equal)
         end
     ]=], vim.fn.getcwd(), vim.env.INKSTONE_PARSER_RTP)
 
+    test('text fragment links with unmatched parentheses hide destinations and preserve adjacent text', function()
+        equal(lua([=[
+            local url = 'https://example.org/page#:~:text=DELETE%20Repository,-MySQL%20(new'
+            local source = '前 [設計](' .. url .. ') 後'
+            setup({ source, '', 'AFTER' })
+            local result = { rows(3), vim.api.nvim_get_current_line() }
+            vim.cmd('normal! yy')
+            result[3] = vim.fn.getreg('"')
+            require('inkstone.state').get(vim.api.nvim_get_current_buf()).anti_conceal.enabled = true
+            refresh()
+            result[4] = table.concat(rows(8)):find('https://example.org', 1, true) ~= nil
+            return result
+        ]=]), { { '前 󰖟 設計 後', '', 'AFTER' },
+            '前 [設計](https://example.org/page#:~:text=DELETE%20Repository,-MySQL%20(new) 後',
+            '前 [設計](https://example.org/page#:~:text=DELETE%20Repository,-MySQL%20(new) 後\n', true })
+    end)
+
+    test('long hidden link destinations keep the same screen rows as short ones', function()
+        local result = lua([=[
+            local result = {}
+            for _, url in ipairs({ 'https://example.org/x', 'https://example.org/' .. string.rep('selection', 100),
+                'https://example.org/page#:~:text=' .. string.rep('selection', 100) .. ',last%20(new' }) do
+                local source = '前 [設計](' .. url .. ') 後'
+                setup({ source, '', 'AFTER' })
+                result[#result + 1] = rows(3)
+                vim.cmd('normal! yy')
+                assert(vim.fn.getreg('"') == source .. '\n', 'link rendering changed the source')
+            end
+            return result
+        ]=])
+        equal(result[1], { '前 󰖟 設計 後', '', 'AFTER' })
+        equal(result[2], result[1])
+    end)
+
+    test('h and l skip hidden link syntax with counts while raw views and operators stay native', function()
+        for _, url in ipairs({ 'https://example.org/' .. string.rep('long', 80),
+            'https://example.org/page#:~:text=first,last%20(new' }) do
+            local after = lua([=[
+                local url = ...
+                local source = 'A [設計](' .. url .. ') Z'
+                setup({ source, '', 'AFTER' })
+                return source:find(' Z', 1, true) - 1
+            ]=], url)
+            for _, spec in ipairs({ { 6, 'l', after }, { after, 'h', 6 },
+                { 1, 'l', 3 }, { 3, 'h', 1 }, { 6, '2l', after + 1 }, { 3, '2h', 0 } }) do
+                lua('vim.api.nvim_win_set_cursor(0, { 1, ... }); refresh()', spec[1])
+                rpc('nvim_input', spec[2])
+                local actual = lua('vim.wait(50); return vim.api.nvim_win_get_cursor(0)[2]')
+                equal(actual, spec[3])
+            end
+            lua('vim.api.nvim_win_set_cursor(0, { 1, 6 }); refresh()')
+            rpc('nvim_input', 'v')
+            lua("assert(vim.wait(1000, function() return vim.fn.mode() == 'v' end, 5))")
+            rpc('nvim_input', 'l')
+            equal(lua('vim.wait(50); return vim.api.nvim_win_get_cursor(0)[2]'), 9)
+            rpc('nvim_input', '<Esc>')
+            lua([=[
+                assert(vim.wait(1000, function() return vim.fn.mode() == 'n' end, 5))
+                local config = require('inkstone.state').get(vim.api.nvim_get_current_buf())
+                config.anti_conceal.enabled = true
+                config.win_options.concealcursor.rendered = ''
+                vim.api.nvim_win_set_cursor(0, { 1, 6 })
+                refresh()
+            ]=])
+            rpc('nvim_input', 'l')
+            equal(lua('vim.wait(50); return vim.api.nvim_win_get_cursor(0)[2]'), 9)
+            lua('vim.api.nvim_win_set_cursor(0, { 1, 3 })')
+            rpc('nvim_input', 'dl')
+            lua([=[
+                vim.wait(50)
+                assert(vim.api.nvim_get_current_line():sub(1, #'A [計]') == 'A [計]', 'operator used display movement')
+                require('inkstone.api').disable()
+                vim.wait(50)
+                vim.api.nvim_win_set_cursor(0, { 1, 1 })
+            ]=])
+            rpc('nvim_input', 'l')
+            equal(lua('vim.wait(50); return vim.api.nvim_win_get_cursor(0)[2]'), 2)
+        end
+        lua([=[
+            setup({ 'A [設計](https://example.org/end)' })
+            vim.api.nvim_win_set_cursor(0, { 1, 6 })
+            refresh()
+        ]=])
+        rpc('nvim_input', '2l')
+        equal(lua('vim.wait(50); return vim.api.nvim_win_get_cursor(0)[2]'), 6)
+        lua([=[
+            vim.opt.whichwrap:append({ 'h', 'l' })
+            setup({ 'A [設計](https://example.org/end)', 'Z' })
+            vim.api.nvim_win_set_cursor(0, { 1, 6 })
+            refresh()
+        ]=])
+        rpc('nvim_input', 'l')
+        equal(lua('vim.wait(50); return vim.api.nvim_win_get_cursor(0)'), { 2, 0 })
+        rpc('nvim_input', 'h')
+        equal(lua('vim.wait(50); return vim.api.nvim_win_get_cursor(0)'), { 1, 6 })
+        lua("vim.opt.whichwrap:remove({ 'h', 'l' })")
+    end)
+
     test('ordinary Markdown buffers skip long details with default source and screen mappings', function()
         for _, anti in ipairs({ false, true }) do
             lua([=[

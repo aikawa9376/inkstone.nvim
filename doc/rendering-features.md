@@ -94,6 +94,28 @@ remain visible. A split showing a different buffer does not disable BudouX.
 Closing a shared view, resizing or changing wrap options rebuilds the layout.
 This is not full JIS X 4051 conformance.
 
+## Links
+
+Inline links retain their labels while destinations and delimiters are concealed.
+Browser text fragments (`#:~:text=...`) sometimes contain unmatched literal `(`
+characters, causing Markdown to parse only the `[label]` as a shortcut. Inkstone
+recovers these single-line HTTP(S) destinations, including commas and encoded
+text, without changing source bytes. Recovery stops at whitespace, another
+label, inline code, HTML or table-cell boundaries and uses the final `)` in that
+URL token. Ordinary invalid Markdown remains visible.
+
+Normal-mode `h/l` automatically skip hidden syntax within displayed links;
+counts such as `2l` count visible characters. The mappings use current conceal
+ranges without reparsing. Revealed source, disabled rendering, operators and
+Visual mode retain native movement. Override the buffer-local defaults in
+`on.attach` if desired. `<Plug>(InkstoneMoveLeft)` / `<Plug>(InkstoneMoveRight)`
+and `:Inkstone move_left` / `move_right` expose the same actions.
+
+On Neovim builds with conceal-aware wrapping, long hidden destinations use the
+same screen space as short ones. Link rows use native wrapping; see
+[the build-dependent wrapping limits](limitations.md#conceal-and-native-wrapping-depend-on-the-neovim-build)
+for older Neovim versions.
+
 ## LaTeX formulas
 
 `latex.enabled = true` converts `$...$` and `$$...$$` through the first available

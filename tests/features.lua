@@ -42,6 +42,30 @@ return function(test, equal, buffer)
         vim.api.nvim_buf_delete(buf, { force = true })
     end)
 
+    test('text fragment recovery is limited to rejected URLs and keeps neighboring source intact', function()
+        local url = 'https://example.org/page#:~:text=first,last%20(new'
+        local link = '[設計](' .. url .. ')'
+        local source = link .. '[別](' .. url .. ') 終わり'
+        local lines = { source, '', '[普通](https://example.org/(new)', '',
+            '`' .. link .. '`', '', '```markdown', link, '```' }
+        local buf, _, ctx, marks = parse(lines, { code = { enabled = false }, folds = { enabled = false } })
+        local icons = {}
+        for _, mark in ipairs(marks) do
+            if mark.link_range then
+                equal(mark.start_row, 0)
+                icons[#icons + 1] = { mark.start_col, mark.link_range[4] }
+            end
+        end
+        equal(icons, { { 0, #link }, { #link, #source - #' 終わり' } })
+        local body = { start_row = 0, end_row = 0, start_col = 0, end_col = #source, text = source }
+        equal(ctx:width(body), vim.fn.strdisplaywidth('󰖟 設計󰖟 別 終わり'))
+        equal(vim.api.nvim_buf_get_lines(buf, 0, -1, false), lines)
+        vim.api.nvim_buf_delete(buf, { force = true })
+        buf, _, _, marks = parse({ link }, { link = { enabled = false } })
+        equal(marks, {})
+        vim.api.nvim_buf_delete(buf, { force = true })
+    end)
+
     test('table heading borders preserve color with opt-in RGB and cterm bold', function()
         local colors = require('inkstone.core.colors')
         local source = 'InkstoneTestTableHead'

@@ -117,6 +117,17 @@ wraps; raw/disabled views, operators and Visual mode stay native. on.attach can
 override the buffer-local defaults.
 :Inkstone move_down / move_up and the corresponding Lua functions are also available.
 
+LINKS
+Normal-mode h/l skip hidden URL text and delimiters inside displayed links,
+including counts such as 2l. Raw views, operators and Visual mode stay native.
+Defaults are buffer-local and can be overridden in on.attach.
+<Plug>(InkstoneMoveLeft) / <Plug>(InkstoneMoveRight), :Inkstone move_left /
+move_right and the corresponding Lua functions expose the same movement.
+Browser text fragments (#:~:text=...) containing unmatched literal opening
+parentheses are recovered as single-line HTTP(S) links without changing source.
+Long hidden URLs use displayed-width wrapping on conceal-aware Neovim builds;
+older builds retain the native wrapping limitations.
+
 TABLE VIEWS
 :Inkstone toggle_table cycles table -> list -> chart -> table under the cursor.
 :Inkstone toggle_list switches table/list; :Inkstone toggle_chart switches
