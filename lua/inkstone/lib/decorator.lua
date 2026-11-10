@@ -9,6 +9,9 @@ local replacements = require('inkstone.lib.replacements')
 ---@field private marks render.md.Extmark[]
 ---@field private generated render.md.Extmark[]
 ---@field private tick integer?
+---@field private padding { row: integer, mark: render.md.Extmark }[]
+---@field private watching boolean?
+---@field private disposed boolean?
 ---@field n integer
 local Decorator = {}
 Decorator.__index = Decorator
@@ -23,6 +26,7 @@ function Decorator.new(buf)
     self.marks = {}
     self.generated = {}
     self.tick = nil
+    self.padding = {}
     self.n = 0
     return self
 end
@@ -103,6 +107,37 @@ function Decorator:clear(ns)
     end
     self.generated = {}
     self.layout = nil
+    self.padding = {}
+end
+
+-- Whole-line streaming updates collapse inline extmarks to column zero. Remove
+-- obsolete wrap padding synchronously, before a redraw can precede TextChanged,
+-- the debounce timer or async parsing. Keep unaffected rows and decorations.
+---@private
+---@param ns integer
+function Decorator:watch_padding(ns)
+    if self.watching then return end
+    self.watching = vim.api.nvim_buf_attach(self.buf, false, {
+        on_lines = function(_, _, _, first, last, new_last)
+            if self.disposed then return true end
+            local retained = {}
+            for _, entry in ipairs(self.padding) do
+                if entry.row >= first and entry.row < last then
+                    entry.mark:hide(ns, self.buf)
+                else
+                    if entry.row >= last then entry.row = entry.row + new_last - last end
+                    retained[#retained + 1] = entry
+                end
+            end
+            self.padding = retained
+        end,
+        on_reload = function()
+            if self.disposed then return true end
+            for _, entry in ipairs(self.padding) do entry.mark:hide(ns, self.buf) end
+            self.padding = {}
+        end,
+        on_detach = function() self.padding, self.watching = {}, nil end,
+    })
 end
 
 ---@param ns integer
@@ -110,15 +145,20 @@ end
 function Decorator:display(ns, hide)
     local visible = {} ---@type render.md.Mark[]
     local layout = {}
+    self.padding = {}
     for _, extmark in ipairs(self.marks) do
         if hide(extmark) then
             extmark:hide(ns, self.buf)
         else
             extmark:show(ns, self.buf)
             visible[#visible + 1] = extmark:get()
+            if extmark:get().paragraph_padding and extmark:shown() then
+                self.padding[#self.padding + 1] = { row = extmark:get().start_row, mark = extmark }
+            end
             if extmark:get().replace or extmark:get().opts.conceal_lines then layout[#layout + 1] = extmark end
         end
     end
+    if #self.padding > 0 then self:watch_padding(ns) end
 
     local line_count = vim.api.nvim_buf_line_count(self.buf)
     local tick = self:get_tick()
@@ -175,6 +215,8 @@ function Decorator:schedule(debounce, ms, callback)
 end
 
 function Decorator:dispose()
+    self.disposed = true
+    self.padding = {}
     self.pending = nil
     if self.timer and not self.timer:is_closing() then
         self.timer:stop()

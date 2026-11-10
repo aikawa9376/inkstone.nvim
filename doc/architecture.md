@@ -112,6 +112,14 @@ burst. Buffer wipe disposes timers and drops manager/UI/config/context state.
 A setup reset also disposes old UI decorators. No background native worker is
 started by this version.
 
+Native paragraph padding has a synchronous buffer-change guard in
+`lib/decorator.lua:watch_padding`. Whole-line replacements can collapse old inline
+padding marks to column zero before the scheduled render. The guard removes only
+the changed source rows' padding in `on_lines`, tracking unaffected rows through
+insertions/deletions even when several edits precede parsing. Other decorations
+retain the normal reconciliation lifecycle. The next render rebuilds the padding;
+this guard applies independently of conceal-aware wrap support.
+
 ## Japanese layout
 
 `text/grapheme.lua` produces display clusters for tested combining marks,

@@ -847,6 +847,28 @@ return function(test, equal)
         equal(actual[5], true)
     end)
 
+    test('streamed paragraph replacement never shows old wrap padding at the line start', function()
+        for _, aware in ipairs({ false, true }) do
+            equal(lua([=[
+                local aware = ...
+                local softwrap = require('inkstone.lib.softwrap')
+                local supported = softwrap.conceal_aware_supported
+                softwrap.conceal_aware_supported = aware
+                local source = ('今日は天気がいいから散歩しましょう。'):rep(6)
+                setup({ source, '', 'AFTER' })
+                assert(padding_count() > 3, 'fixture needs multiple wrap boundaries')
+                -- Observe the frame before TextChanged, debounce or async parsing
+                -- can repair extmarks collapsed by a whole-line streaming update.
+                vim.api.nvim_buf_set_lines(0, 0, 1, false, { source .. '追加' })
+                local first = rows(1)[1]
+                refresh()
+                assert(padding_count() > 3, 'wrap padding must recover after rendering')
+                softwrap.conceal_aware_supported = supported
+                return first:sub(1, #'今日は')
+            ]=], aware), '今日は')
+        end
+    end)
+
     test('BudouX survives list display and a split showing a different buffer', function()
         equal(lua([=[
             setup({'今日は天気がいいから散歩しましょう。'})

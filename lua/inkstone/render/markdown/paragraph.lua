@@ -104,8 +104,9 @@ function Render:softwrap(margin, indent)
                     self.marks:add(self.config, false, row, boundary.col, {
                         priority = 100, virt_text = line, virt_text_pos = 'inline', right_gravity = false,
                     })
+                    local marks = self.marks:get()
+                    marks[#marks].paragraph_padding = true
                     if projected then
-                        local marks = self.marks:get()
                         marks[#marks].paragraph_concealed = variant == 'concealed'
                     end
                 end

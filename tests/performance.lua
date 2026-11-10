@@ -193,6 +193,39 @@ return function(test, equal, buffer)
         vim.api.nvim_buf_delete(buf, { force = true })
     end)
 
+    test('wrap invalidation tracks rows across edits before the next render and keeps other marks', function()
+        local buf = buffer({ 'first paragraph', '', 'second paragraph' })
+        local decorator = require('inkstone.lib.decorator').new(buf)
+        local Extmark = require('inkstone.lib.extmark')
+        local ns = vim.api.nvim_create_namespace('inkstone-padding-invalidation-test')
+        local function padding(row)
+            return Extmark.new({ conceal = false, paragraph_padding = true, start_row = row, start_col = 5,
+                opts = { virt_text = { { '    ', 'Normal' } }, virt_text_pos = 'inline', right_gravity = false } })
+        end
+        local first, second = padding(0), padding(2)
+        local highlight = Extmark.new({ conceal = false, start_row = 0, start_col = 0,
+            opts = { end_col = 5, hl_group = 'String' } })
+        decorator:set({ first, second, highlight })
+        decorator:display(ns, function() return false end)
+        local original = vim.api.nvim_buf_get_extmarks(buf, ns, 0, -1, {})
+        vim.api.nvim_buf_set_lines(buf, 0, 0, false, { 'inserted' })
+        assert(first:shown() and second:shown() and highlight:shown())
+        -- Descriptions still have the old source rows; the watcher must track
+        -- native movement even when several changes precede parsing.
+        vim.api.nvim_buf_set_text(buf, 1, 0, 1, 1, { 'F' })
+        assert(not first:shown() and second:shown() and highlight:shown())
+        local remaining = vim.api.nvim_buf_get_extmarks(buf, ns, 0, -1, {})
+        equal(#remaining, 2)
+        equal(remaining[2], { original[3][1], 3, 5 })
+        vim.api.nvim_buf_set_lines(buf, 0, 1, false, {})
+        assert(second:shown())
+        vim.api.nvim_buf_set_lines(buf, 2, 3, false, { 'replaced second paragraph' })
+        assert(not second:shown() and highlight:shown())
+        decorator:clear(ns)
+        decorator:dispose()
+        vim.api.nvim_buf_delete(buf, { force = true })
+    end)
+
     test('custom clear callbacks still see an empty render namespace', function()
         local ui, calls = require('inkstone.core.ui'), 0
         local buf = setup({ '# Heading', '', 'text' }, { on = { clear = function(args)
