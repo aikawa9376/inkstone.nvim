@@ -111,6 +111,30 @@ Visual mode retain native movement. Override the buffer-local defaults in
 `on.attach` if desired. `<Plug>(InkstoneMoveLeft)` / `<Plug>(InkstoneMoveRight)`
 and `:Inkstone move_left` / `move_right` expose the same actions.
 
+`gf` and `gx` resolve the destination from anywhere inside a link, including the
+middle of its visible label (`[tes|t](url)`). `gf` edits local files and opens
+URLs through `vim.ui.open`; `gx` opens either with the system handler. Relative
+files resolve against the source document (also in the side preview), or
+`b:inkstone_root`/the working directory for unnamed transcript buffers. Percent
+escapes, `path:line:column`, `#L12C3` and ATX heading fragments are supported for
+local files. Inline/image links, reference links, autolinks, wiki links and the
+recovered browser text fragments above are recognized. Bare URLs and path-like
+tokens, including paths inside inline code, are also targets.
+
+`]u` / `[u` move to the next/previous URL or path in source order, landing on
+the visible label of a Markdown link. Counts such as `3]u` are supported; movement
+stops at the first/last target without wrapping. Targets are read from current
+source on demand, so pending streaming renders do not leave stale destinations.
+Existing buffer-local mappings (for example Obsidian's `gf` or Git review
+navigation) take precedence. When no target is found, `gf`/`gx` use their prior
+global mapping or native action. These defaults are Normal-mode only and can
+be overridden in `on.attach`.
+
+The corresponding Lua/command actions are `edit_link`, `open_link`, `next_link`
+and `prev_link`; mappings can also use `<Plug>(InkstoneEditLink)`,
+`<Plug>(InkstoneOpenLink)`, `<Plug>(InkstoneNextLink)` and
+`<Plug>(InkstonePrevLink)`.
+
 On Neovim builds with conceal-aware wrapping, long hidden destinations use the
 same screen space as short ones. Link rows use native wrapping; see
 [the build-dependent wrapping limits](limitations.md#conceal-and-native-wrapping-depend-on-the-neovim-build)

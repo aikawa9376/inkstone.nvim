@@ -51,6 +51,130 @@ function M.attach(buf)
             buffer = buf, desc = 'Move past hidden Markdown link syntax',
         })
     end
+    -- Respect integrations such as Obsidian's gf and Git's review navigation.
+    -- User on.attach hooks still run after these defaults.
+    local actions = {
+        gf = { function() return M.open(false) end, 'Edit link destination' },
+        gx = { function() return M.open(true) end, 'Open link destination with system handler' },
+        [']u'] = { function() M.jump(1); return true end, 'Next URL or path' },
+        ['[u'] = { function() M.jump(-1); return true end, 'Previous URL or path' },
+    }
+    vim.api.nvim_buf_call(buf, function()
+        for key, action in pairs(actions) do
+            local previous = vim.fn.maparg(key, 'n', false, true)
+            if previous.buffer ~= 1 then
+                vim.keymap.set('n', key, function()
+                    if not action[1]() then M.fallback(key, previous) end
+                end, { buffer = buf, desc = action[2] })
+            end
+        end
+    end)
+end
+
+---@private
+function M.fallback(key, mapping)
+    local rhs
+    if mapping.callback then
+        rhs = mapping.callback()
+        if mapping.expr ~= 1 then return end
+    elseif mapping.rhs and mapping.rhs ~= '' then
+        rhs = mapping.expr == 1 and vim.api.nvim_eval(mapping.rhs) or mapping.rhs
+        rhs = rhs:gsub('<SID>', '<SNR>' .. (mapping.sid or 0) .. '_')
+    else
+        vim.cmd.normal({ args = { (vim.v.count > 0 and tostring(vim.v.count) or '') .. key }, bang = true })
+        return
+    end
+    if rhs and rhs ~= '' then
+        vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes(rhs, true, false, true),
+            mapping.noremap == 1 and 'n' or 'm', false)
+    end
+end
+
+function M.target()
+    local item = require('inkstone.core.link_targets').current(vim.api.nvim_get_current_buf(), vim.api.nvim_win_get_cursor(0))
+    return item and item.target
+end
+
+local function heading(fragment)
+    if not fragment or fragment == '' then return end
+    local row, col = fragment:match('^L(%d+)C(%d+)')
+    row = row or fragment:match('^L(%d+)')
+    if row then
+        row = math.min(tonumber(row), vim.api.nvim_buf_line_count(0))
+        local line = vim.api.nvim_buf_get_lines(0, row - 1, row, false)[1] or ''
+        vim.api.nvim_win_set_cursor(0, { math.max(1, row), math.min(math.max(0, (tonumber(col) or 1) - 1), #line) })
+        return
+    end
+    fragment = fragment:gsub('%%(%x%x)', function(hex) return string.char(tonumber(hex, 16)) end)
+    for i, line in ipairs(vim.api.nvim_buf_get_lines(0, 0, -1, false)) do
+        local title = line:match('^%s*#+%s+(.+)')
+        if title then
+            local slug = title:lower():gsub('%s+#+%s*$', ''):gsub('[%p]', function(c) return c == '-' and c or '' end):gsub('%s+', '-')
+            if slug == fragment:lower() then vim.api.nvim_win_set_cursor(0, { i, 0 }); return end
+        end
+    end
+end
+
+-- gf edits local files and opens URLs; gx uses the user's vim.ui.open handler.
+-- Neither action moves the cursor into concealed source to discover a target.
+function M.open(system)
+    local target = M.target()
+    if not target then return false end
+    target = target:gsub('\\([%p ])', '%1')
+    if (target:match('^%a[%w+.-]*://') or target:match('^mailto:')) and not target:match('^file://') then
+        local _, err = vim.ui.open(target)
+        if err then vim.notify(err, vim.log.levels.ERROR) end
+        return true
+    end
+    local path, fragment = target:match('^(.-)#(.*)$')
+    path = path or target
+    local row, col
+    local filename, lnum, column = path:match('^(.-):(%d+):(%d+)$')
+    if not filename then filename, lnum = path:match('^(.-):(%d+)$') end
+    if filename then path, row, col = filename, tonumber(lnum), tonumber(column) or 1 end
+    if path == '' then
+        vim.cmd("normal! m'")
+        heading(fragment)
+        return true
+    end
+    local buf = vim.api.nvim_get_current_buf()
+    if path:sub(1, 2) == '~/' then path = vim.fn.expand('~') .. path:sub(2) end
+    local resolved = require('inkstone.core.media').resolve(buf, path)
+    if not resolved then return true end
+    if not vim.uv.fs_stat(resolved) then
+        local found = vim.fn.findfile(path, vim.bo.path)
+        if found ~= '' then resolved = vim.fn.fnamemodify(found, ':p') end
+    end
+    if system then
+        local _, err = vim.ui.open(resolved)
+        if err then vim.notify(err, vim.log.levels.ERROR) end
+    elseif not vim.uv.fs_stat(resolved) then
+        vim.notify('Inkstone: file not found: ' .. path, vim.log.levels.WARN)
+    else
+        vim.cmd("normal! m'")
+        vim.api.nvim_cmd({ cmd = 'edit', args = { resolved }, magic = { file = false, bar = false } }, {})
+        if row then heading(('L%dC%d'):format(row, col)) else heading(fragment) end
+        vim.cmd('normal! zv')
+    end
+    return true
+end
+
+function M.jump(direction, count)
+    local targets = require('inkstone.core.link_targets')
+    local cursor, candidates = vim.api.nvim_win_get_cursor(0), {}
+    for _, item in ipairs(targets.collect(vim.api.nvim_get_current_buf())) do
+        local pos = item.pos
+        local after = pos[1] > cursor[1] or pos[1] == cursor[1] and pos[2] > cursor[2]
+        local before = pos[1] < cursor[1] or pos[1] == cursor[1] and pos[2] < cursor[2]
+        if not targets.contains(item.range, cursor[1] - 1, cursor[2])
+            and (direction > 0 and after or direction < 0 and before) then candidates[#candidates + 1] = item end
+    end
+    if #candidates == 0 then return end
+    local index = math.min(count or vim.v.count1, #candidates)
+    local item = candidates[direction > 0 and index or #candidates - index + 1]
+    vim.cmd("normal! m'")
+    vim.api.nvim_win_set_cursor(0, item.pos)
+    vim.cmd('normal! zv')
 end
 
 function M.move(direction, count)

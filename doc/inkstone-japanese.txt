@@ -123,6 +123,17 @@ including counts such as 2l. Raw views, operators and Visual mode stay native.
 Defaults are buffer-local and can be overridden in on.attach.
 <Plug>(InkstoneMoveLeft) / <Plug>(InkstoneMoveRight), :Inkstone move_left /
 move_right and the corresponding Lua functions expose the same movement.
+gf/gx resolve the destination while the cursor is anywhere inside the link
+label. gf edits local files and opens URLs; gx uses vim.ui.open for both.
+]u/[u visit the next/previous URL or path, landing on link labels. Counts such
+as 3]u work; navigation stops at the ends. Relative paths use the source file's
+directory, or b:inkstone_root/cwd for unnamed buffers. Local path:line:column,
+#L12C3 and ATX heading fragments are supported. Existing buffer-local mappings
+take precedence; gf/gx fall back to the previous global/native action when no
+target is found. These mappings only apply in Normal mode.
+:Inkstone edit_link / open_link / next_link / prev_link and the corresponding
+Lua actions and <Plug>(InkstoneEditLink/InkstoneOpenLink/InkstoneNextLink/
+InkstonePrevLink) mappings expose the same actions.
 Browser text fragments (#:~:text=...) containing unmatched literal opening
 parentheses are recovered as single-line HTTP(S) links without changing source.
 Long hidden URLs use displayed-width wrapping on conceal-aware Neovim builds;

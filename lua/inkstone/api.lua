@@ -89,6 +89,22 @@ function M.move_right()
     require('inkstone.core.links').move(1)
 end
 
+function M.open_link()
+    require('inkstone.core.links').open(true)
+end
+
+function M.edit_link()
+    require('inkstone.core.links').open(false)
+end
+
+function M.next_link()
+    require('inkstone.core.links').jump(1)
+end
+
+function M.prev_link()
+    require('inkstone.core.links').jump(-1)
+end
+
 function M.toggle_table()
     require('inkstone.core.table_views').toggle()
 end

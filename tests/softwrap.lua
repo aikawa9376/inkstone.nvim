@@ -77,6 +77,29 @@ return function(test, equal)
             '前 [設計](https://example.org/page#:~:text=DELETE%20Repository,-MySQL%20(new) 後\n', true })
     end)
 
+    test('gf and gx use hidden destinations from the label and counted URL motions land on labels', function()
+        lua([=[
+            setup({ '先頭 [test](https://example.org/one) と [次](https://example.org/two)', '',
+                '最後 [日本語](https://example.org/three)' })
+            _G.link_opened = {}
+            _G.link_open_original = vim.ui.open
+            vim.ui.open = function(url) table.insert(_G.link_opened, url) end
+            vim.api.nvim_win_set_cursor(0, { 1, #'先頭 [tes' })
+        ]=])
+        for expected, key in ipairs({ 'gf', 'gx' }) do
+            rpc('nvim_input', key)
+            lua('local expected = ...; assert(vim.wait(1000, function() return #_G.link_opened == expected end, 5))', expected)
+        end
+        equal(lua('return _G.link_opened'), { 'https://example.org/one', 'https://example.org/one' })
+        rpc('nvim_input', '2]u')
+        equal(lua('vim.wait(30); return vim.api.nvim_win_get_cursor(0)'), { 3, #'最後 [' })
+        rpc('nvim_input', '[u')
+        equal(lua('vim.wait(30); return vim.api.nvim_win_get_cursor(0)'), { 1, #'先頭 [test](https://example.org/one) と [' })
+        rpc('nvim_input', '[u')
+        equal(lua('vim.wait(30); return vim.api.nvim_win_get_cursor(0)'), { 1, #'先頭 [' })
+        lua('vim.ui.open = _G.link_open_original; _G.link_open_original, _G.link_opened = nil, nil')
+    end)
+
     test('long hidden link destinations keep the same screen rows as short ones', function()
         local result = lua([=[
             local result = {}

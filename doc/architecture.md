@@ -235,6 +235,21 @@ cursor-line conceal and mark visibility; individual key presses do not parse.
 the fold motions. Counts traverse visible positions; raw views, operators and
 Visual retain native motions.
 
+`core/link_targets.lua` resolves source destinations separately from the render
+snapshot. User-triggered actions parse current Markdown trees, join reference
+definitions to labels, recover text-fragment links and collect autolinks/wiki
+links. Structured ranges mask lexical URL/path tokens to avoid visiting hidden
+destinations twice; bare paths inside code remain navigable. Entries retain
+half-open byte ranges for hit testing and label positions for motion. No target
+collection runs during rendering or ordinary `h/l` movement.
+`core/links.lua:open` resolves anywhere inside the source link range, edits local
+files with document/preview/root-relative paths for `gf`, and delegates URLs and
+`gx` to `vim.ui.open`. Counted `jump` walks source order without wrapping, skipping
+the containing link and saving the jump origin. The new defaults preserve prior
+buffer-local mappings and fall back to global/native `gf/gx` outside targets;
+`on.attach` can override them. `tests/links.lua` covers source freshness, labels,
+references, UTF-8 positions, paths/anchors, navigation and mapping integration.
+
 Replacement chunks also carry persistent foreign extmark range highlights,
 including LazyAgent transcript role colors. `Highlights:extmarks` queries only
 visible ranges with overlap enabled, clips multiline byte ranges per row, and
